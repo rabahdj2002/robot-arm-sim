@@ -42,7 +42,7 @@ export class RobotArm {
     this.scene.add(this.group);
     this.showFrames = true;
     this.targetMarker = new THREE.Mesh(
-      new THREE.SphereGeometry(0.015, 16, 16),
+      new THREE.SphereGeometry(0.026, 16, 16), // bigger than the EE tip so it stays visible on contact
       new THREE.MeshBasicMaterial({ color: 0x44ff88 }),
     );
     this.targetMarker.visible = false;

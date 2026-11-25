@@ -5,13 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Robot Arm Kinematics Simulator — DH FK/IK</title>
   <meta name="description" content="Interactive robot arm simulator: define joints, compute Denavit–Hartenberg forward kinematics and numerical inverse kinematics in real time.">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=1.1">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦾</text></svg>">
   <script type="importmap">
     {
       "imports": {
         "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+        "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/",
+        "./js/dh.js": "./js/dh.js?v=1.1",
+        "./js/ik.js": "./js/ik.js?v=1.1",
+        "./js/arm.js": "./js/arm.js?v=1.1",
+        "./js/ui.js": "./js/ui.js?v=1.1"
       }
     }
   </script>
@@ -30,8 +34,8 @@
   </main>
   <footer>
     <span>Standard DH convention: Rot<sub>z</sub>(θ)·Trans<sub>z</sub>(d)·Trans<sub>x</sub>(a)·Rot<sub>x</sub>(α) — IK via damped least squares on the position Jacobian</span>
-    <a href="https://github.com/rabahdj2002/robot-arm-sim" target="_blank" rel="noopener">Source</a>
+    <span>v1.1 · <a href="https://github.com/rabahdj2002/robot-arm-sim" target="_blank" rel="noopener">Source</a></span>
   </footer>
-  <script type="module" src="js/main.js"></script>
+  <script type="module" src="js/main.js?v=1.1"></script>
 </body>
 </html>
