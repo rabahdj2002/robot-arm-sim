@@ -94,13 +94,22 @@ export class Panel {
     this.target = [0.25, 0.2, 0.15];
     const doSolve = () => {
       if (!this.target) return;
-      const res = solveIK(this.joints, this.target);
+      // Hand the solver the collision predicate — it keeps retrying other
+      // seeds/branches until it finds a converged solution that also
+      // doesn't collide, instead of rejecting the first branch it finds.
+      const res = solveIK(this.joints, this.target, {
+        validate: this.collisionEnabled
+          ? (v) => !checkCollisions(this.joints, v)
+          : null,
+      });
       const coll = this.collisionEnabled
         ? checkCollisions(this.joints, res.values)
         : null;
       const st = this.root.querySelector('#ik-status');
       if (coll) {
-        st.textContent = `blocked — ${describeCollision(coll)}`;
+        st.textContent = res.converged
+          ? `all branches collide — ${describeCollision(coll)}`
+          : `blocked — ${describeCollision(coll)}`;
         st.className = 'status warn';
       } else {
         this.joints.forEach((j, i) => { j.value = res.values[i]; });

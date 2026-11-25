@@ -164,6 +164,11 @@ function seedValues(joints, r) {
  * for live solving). On failure, restart from structured seeds — flipping
  * the base joint 180° (the classic wrong-side trap), then deterministic
  * pseudo-random configurations — and keep the best result.
+ *
+ * options.validate(values) — optional predicate (e.g. collision check).
+ * The first converged AND valid solution is returned immediately; a
+ * converged-but-invalid solution is only a fallback for when every
+ * converged branch fails validation.
  */
 export function solveIK(joints, target, options = {}) {
   const {
@@ -172,6 +177,7 @@ export function solveIK(joints, target, options = {}) {
     damping = 0.05,
     restarts = 6,
     budgetMs = 60,
+    validate = null,
   } = options;
   const opts = { maxIterations, tolerance, damping };
   const cur = joints.map((j) => j.value);
@@ -193,15 +199,21 @@ export function solveIK(joints, target, options = {}) {
   for (let r = 0; r < restarts; r++) seeds.push(seedValues(joints, r));
 
   const deadline = Date.now() + budgetMs;
-  let best = null;
+  let best = null;          // best error, any validity
+  let bestInvalid = null;   // converged but failed validate()
   for (const seed of seeds) {
     // CCD first — geometric and cheap; DLS refines when it misses
     for (const solve of [ccdIterate, iterate]) {
       const res = solve(joints, target, seed.slice(), opts);
-      if (res.converged) return res;
+      if (res.converged) {
+        if (!validate || validate(res.values)) return res;
+        if (!bestInvalid) bestInvalid = res;
+      }
       if (!best || res.error < best.error) best = res;
     }
     if (Date.now() > deadline) break;
   }
-  return best;
+  // Every converged branch was invalid — surface one so the caller can
+  // explain *why* it's blocked instead of pretending out-of-reach.
+  return bestInvalid || best;
 }

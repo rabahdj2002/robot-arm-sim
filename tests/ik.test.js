@@ -122,6 +122,27 @@ test('solved values always respect restricted joint limits', () => {
   assert.ok(res.values[0] <= 1.0 + 1e-9 && res.values[0] >= -1.0 - 1e-9);
 });
 
+test('validate() makes IK search for a collision-free branch', () => {
+  const joints = reach2R();
+  joints[1].value = 1.8; // parked elbow-up
+  const target = [0.45, 0.1, 0]; // reachable by BOTH elbow branches
+  // Reject elbow-up configurations — solver must find elbow-down instead
+  const res = solveIK(joints, target, { validate: (v) => v[1] < 0 });
+  assert.ok(res.converged, `failed to converge, err=${res.error}`);
+  assert.ok(res.values[1] < 0, `solver kept invalid elbow-up J2=${res.values[1]}`);
+  const p = getPosition(forwardKinematics(joints, res.values).endEffector);
+  assert.ok(near(p[0], target[0], 1e-3));
+  assert.ok(near(p[1], target[1], 1e-3));
+});
+
+test('validate() falls back to an invalid branch when all collide', () => {
+  const joints = reach2R();
+  // Validator rejects everything — should still surface a converged
+  // (invalid) result so the caller can explain the block.
+  const res = solveIK(joints, [0.4, 0.2, 0], { validate: () => false });
+  assert.ok(res.converged, `expected converged-but-invalid, err=${res.error}`);
+});
+
 test('Jacobian column matches analytic direction for planar arm', () => {
   const joints = reach2R();
   // At q1=0, moving joint 1 should move EE purely in +y (dpos/dq1 = (0, a1+a2, 0))
