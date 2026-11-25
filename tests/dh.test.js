@@ -108,3 +108,48 @@ test('dhTable marks the joint variable', () => {
   assert.equal(rows[0].variable, 'θ');
   assert.equal(rows[1].variable, 'd');
 });
+
+test('empty chain: FK returns identity, DOF 0, empty DH table', () => {
+  const { transforms, endEffector } = forwardKinematics([]);
+  assert.equal(transforms.length, 1);
+  assert.deepEqual(endEffector, mat4Identity());
+  assert.equal(degreesOfFreedom([]), 0);
+  assert.deepEqual(dhTable([]), []);
+});
+
+test('single joint chain: FK = that joint transform', () => {
+  const j = makeJoint('revolute', { a: 0.2, value: Math.PI / 2 });
+  const { endEffector } = forwardKinematics([j]);
+  assert.ok(vecNear(pos(endEffector), [0, 0.2, 0], 1e-12));
+});
+
+test('chain length scales: FK valid for 1..8 joints', () => {
+  for (let n = 1; n <= 8; n++) {
+    const joints = Array.from({ length: n }, (_, i) =>
+      makeJoint(i % 2 ? 'prismatic' : 'revolute', { a: 0.1, d: 0.05, value: 0.1 * i }));
+    const { transforms, endEffector } = forwardKinematics(joints);
+    assert.equal(transforms.length, n + 1);
+    assert.equal(degreesOfFreedom(joints), n);
+    pos(endEffector).forEach((v) => assert.ok(Number.isFinite(v)));
+  }
+});
+
+test('removing a mid-chain joint changes downstream frames correctly', () => {
+  const j1 = makeJoint('revolute', { a: 0.3 });              // +0.3 x
+  const j2 = makeJoint('prismatic', { a: 0, d: 0.1, value: 0.1 }); // +0.2 z total
+  const j3 = makeJoint('revolute', { a: 0.25 });             // +0.25 x
+  const full = pos(forwardKinematics([j1, j2, j3]).endEffector);
+  assert.ok(vecNear(full, [0.55, 0, 0.2], 1e-12));
+  const minusJ2 = pos(forwardKinematics([j1, j3]).endEffector);
+  assert.ok(vecNear(minusJ2, [0.55, 0, 0], 1e-12)); // z contribution gone
+});
+
+test('splice-out first joint shifts whole chain', () => {
+  const j1 = makeJoint('revolute', { a: 0.3, value: Math.PI / 2 });
+  const j2 = makeJoint('revolute', { a: 0.25 });
+  // j1 rotated 90°: downstream link extends along +y -> EE at (0, 0.55, 0)
+  const withBase = pos(forwardKinematics([j1, j2]).endEffector);
+  assert.ok(vecNear(withBase, [0, 0.55, 0], 1e-12));
+  const without = pos(forwardKinematics([j2]).endEffector);
+  assert.ok(vecNear(without, [0.25, 0, 0], 1e-12));
+});

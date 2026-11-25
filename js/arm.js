@@ -8,6 +8,17 @@ import { forwardKinematics, getPosition, JOINT_TYPES } from './dh.js';
 
 const JOINT_COLORS = { revolute: 0xe05555, prismatic: 0x4da3ff, fixed: 0x888888 };
 
+/** Release GPU resources for a removed subtree (prevents leaks on rebuild). */
+function disposeDeep(obj) {
+  obj.traverse((c) => {
+    c.geometry?.dispose();
+    if (c.material) {
+      const mats = Array.isArray(c.material) ? c.material : [c.material];
+      mats.forEach((m) => m.dispose());
+    }
+  });
+}
+
 function makeLinkMesh(from, to, radius = 0.022, color = 0xd8dde8) {
   const dir = new THREE.Vector3().subVectors(to, from);
   const len = dir.length();
@@ -56,6 +67,7 @@ export class RobotArm {
   /** Rebuild all meshes from joint definitions. */
   build(joints) {
     this.joints = joints;
+    disposeDeep(this.group);
     this.group.clear();
     // base pedestal
     const base = new THREE.Mesh(
@@ -78,7 +90,11 @@ export class RobotArm {
     });
 
     // clear dynamic children (keep base = first child)
-    while (this.group.children.length > 1) this.group.remove(this.group.children[1]);
+    while (this.group.children.length > 1) {
+      const c = this.group.children[1];
+      this.group.remove(c);
+      disposeDeep(c);
+    }
 
     this.joints.forEach((j, i) => {
       const framePoint = points[i]; // joint i sits at frame i's origin (acts about z_{i-1})
