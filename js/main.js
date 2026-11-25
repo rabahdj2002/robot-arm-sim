@@ -7,9 +7,12 @@ import { PRESETS } from './dh.js';
 const canvas = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x11151f);
+scene.background = new THREE.Color(0x0a0e18);
+scene.fog = new THREE.Fog(0x0a0e18, 1.6, 4.5);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 50);
 camera.position.set(0.55, 0.45, 0.75);
@@ -22,6 +25,10 @@ scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x1a2030, 1.0));
 const dir = new THREE.DirectionalLight(0xffffff, 1.6);
 dir.position.set(1.5, 2.5, 1.2);
 scene.add(dir);
+// cool rim light for depth separation from the dark floor
+const rim = new THREE.DirectionalLight(0x4da3ff, 0.7);
+rim.position.set(-1.5, 1.2, -1.5);
+scene.add(rim);
 
 const grid = new THREE.GridHelper(2, 20, 0x2a3350, 0x1d2438);
 scene.add(grid);
@@ -57,6 +64,13 @@ const panel = new Panel(document.getElementById('panel'), joints, {
 });
 
 document.getElementById('frames-toggle').addEventListener('change', (e) => arm.setShowFrames(e.target.checked));
+
+const HOME_POS = [0.55, 0.45, 0.75], HOME_TGT = [0, 0.2, 0];
+document.getElementById('reset-view').addEventListener('click', () => {
+  camera.position.set(...HOME_POS);
+  controls.target.set(...HOME_TGT);
+  controls.update();
+});
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;

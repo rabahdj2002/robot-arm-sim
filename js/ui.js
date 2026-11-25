@@ -62,7 +62,7 @@ export class Panel {
         <label class="toggle"><input id="ik-live" type="checkbox" checked> arm follows target</label>
         <label class="toggle"><input id="col-check" type="checkbox" checked> collision limits (floor + self)</label>
         <div class="row">
-          <button id="ik-solve">Solve IK</button>
+          <button id="ik-solve" class="primary">Solve IK</button>
           <button id="ik-clear">Hide target</button>
         </div>
         <div id="ik-status" class="status"></div>
@@ -149,7 +149,12 @@ export class Panel {
     host.innerHTML = '';
     this.joints.forEach((j, i) => {
       const card = document.createElement('div');
-      card.className = 'joint-card';
+      card.className = `joint-card t-${j.type === 'prismatic' ? 'pris' : 'rev'}`;
+      const chips = j.type === 'prismatic' ? '' : `
+        <div class="qchips">
+          <button data-snap="0">0°</button><button data-snap="1.5708">90°</button>
+          <button data-snap="-1.5708">−90°</button><button data-snap="3.1416">180°</button>
+        </div>`;
       card.innerHTML = `
         <div class="jhead">
           <input class="jname" value="${j.name}">
@@ -164,6 +169,7 @@ export class Panel {
           <input class="qslider" type="range" min="${j.min}" max="${j.max}" step="0.001" value="${j.value}">
           <input class="qval" type="number" step="0.01" value="${j.value.toFixed(3)}">
         </div>
+        ${chips}
         <div class="params">
           <label>θ₀ <input data-p="theta" type="number" step="0.1" value="${j.theta}"></label>
           <label>d <input data-p="d" type="number" step="0.01" value="${j.d}"></label>
@@ -214,6 +220,8 @@ export class Panel {
       };
       slider.addEventListener('input', (e) => setVal(parseFloat(e.target.value)));
       num.addEventListener('change', (e) => setVal(parseFloat(e.target.value) || 0));
+      card.querySelectorAll('[data-snap]').forEach((btn) =>
+        btn.addEventListener('click', () => setVal(parseFloat(btn.dataset.snap))));
 
       card.querySelectorAll('.params input').forEach((inp) =>
         inp.addEventListener('change', (e) => {
@@ -230,9 +238,15 @@ export class Panel {
     const { endEffector } = forwardKinematics(this.joints);
     const [x, y, z] = getPosition(endEffector);
     const [r, p, yw] = getRPY(endEffector);
-    this.root.querySelector('#dof').textContent = degreesOfFreedom(this.joints);
+    const dof = degreesOfFreedom(this.joints);
+    this.root.querySelector('#dof').textContent = dof;
     this.root.querySelector('#ee-pos').textContent = `${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
     this.root.querySelector('#ee-rpy').textContent = `${fmtDeg(r)}, ${fmtDeg(p)}, ${fmtDeg(yw)}`;
+    // HUD overlay lives outside the panel root
+    const hudDof = document.getElementById('hud-dof');
+    if (hudDof) hudDof.textContent = dof;
+    const hudEe = document.getElementById('hud-ee');
+    if (hudEe) hudEe.textContent = `${fmt(x)}, ${fmt(y)}, ${fmt(z)}`;
 
     const rows = dhTable(this.joints);
     this.root.querySelector('#dh-table').innerHTML =
