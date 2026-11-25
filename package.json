@@ -1,0 +1,11 @@
+{
+  "name": "robot-arm-sim",
+  "version": "1.0.0",
+  "description": "Interactive DH-convention robot arm simulator: FK, IK (DLS), DOF — pure frontend",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/",
+    "serve": "npx serve ."
+  },
+  "license": "MIT"
+}
