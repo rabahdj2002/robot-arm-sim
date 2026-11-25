@@ -125,9 +125,18 @@ export class RobotArm {
 
     // tint colliding links red
     const hit = new Set();
+    const nL = this._links.length;
     if (collision) {
       if (collision.type === 'floor') hit.add(collision.link);
-      else { hit.add(collision.linkA); hit.add(collision.linkB); }
+      else if (collision.type === 'self') { hit.add(collision.linkA); hit.add(collision.linkB); }
+      else { // joint-body contact -> tint the links attached to it
+        if (collision.link !== undefined) hit.add(collision.link);
+        if (collision.joint !== undefined && collision.joint < nL) hit.add(collision.joint);
+        if (collision.jointA !== undefined) {
+          hit.add(Math.min(collision.jointA, nL - 1));
+          hit.add(Math.min(collision.jointB, nL - 1));
+        }
+      }
     }
     this._links.forEach((l, i) =>
       l.material.color.setHex(hit.has(i) ? 0xff5555 : 0xd8dde8));

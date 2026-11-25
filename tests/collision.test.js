@@ -100,6 +100,35 @@ test('values override lets callers test candidate poses', () => {
   assert.equal(checkCollisions(joints, [0, 0]), null);
 });
 
+test('adjacent fold: 2R link folded back over its neighbor is caught', () => {
+  const joints = [
+    makeJoint('revolute', { a: 0.3 }),
+    makeJoint('revolute', { a: 0.3, value: Math.PI }),
+  ];
+  const c = checkCollisions(joints);
+  assert.equal(c?.type, 'self');
+});
+
+test('joint-on-joint: chain folded back to the base joint is caught', () => {
+  const joints = [
+    makeJoint('revolute', { a: 0.3 }),
+    makeJoint('revolute', { a: 0, d: 0 }),              // degenerate link
+    makeJoint('revolute', { a: 0.3, value: Math.PI }),  // folds joint 3 onto base
+  ];
+  const c = checkCollisions(joints);
+  assert.equal(c?.type, 'joint');
+});
+
+test('link vs joint body: wrist joint landing beside a link is caught', () => {
+  const joints = [
+    makeJoint('revolute', { a: 0.3 }),
+    makeJoint('revolute', { a: 0.15 }),
+    makeJoint('revolute', { a: 0.2, d: 0.05, value: Math.PI }),
+  ];
+  const c = checkCollisions(joints);
+  assert.equal(c?.type, 'joint');
+});
+
 test('describeCollision names the links', () => {
   assert.match(describeCollision({ type: 'floor', link: 2 }), /link 3.*floor/);
   assert.match(describeCollision({ type: 'self', linkA: 0, linkB: 4 }), /1.*5/);
