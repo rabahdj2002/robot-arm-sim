@@ -1,8 +1,11 @@
 /**
  * Numerical inverse kinematics — damped least-squares (Levenberg–Marquardt)
- * on the position Jacobian. Position-only IK: works for any serial chain.
+ * on the position Jacobian, with restart support. Position-only IK: works
+ * for any serial chain.
  */
-import { forwardKinematics, getPosition } from './dh.js';
+import { forwardKinematics, getPosition, JOINT_TYPES } from './dh.js';
+
+const TWO_PI = Math.PI * 2;
 
 function solve3x3(A, b) {
   // Gaussian elimination with partial pivoting
@@ -27,11 +30,24 @@ function endPosition(joints, values) {
   return getPosition(forwardKinematics(joints, values).endEffector);
 }
 
+/**
+ * Revolute joints whose range spans a full rotation are unbounded — wrap
+ * into [min, max) so the solver can pass "through" ±π instead of stalling
+ * on the clamp. Joints with a real sub-2π range are clamped as physical
+ * limits (same for prismatic joints, which can never wrap).
+ */
+function wrapOrClamp(v, j) {
+  const span = j.max - j.min;
+  if (j.type === JOINT_TYPES.REVOLUTE && span >= TWO_PI - 1e-9) {
+    return j.min + ((((v - j.min) % span) + span) % span);
+  }
+  return Math.min(j.max, Math.max(j.min, v));
+}
+
 /** 3×n position Jacobian via central finite differences. */
 export function positionJacobian(joints, values, eps = 1e-6) {
   const n = joints.length;
   const J = [[], [], []];
-  const base = endPosition(joints, values);
   for (let i = 0; i < n; i++) {
     const vp = values.slice(), vm = values.slice();
     vp[i] += eps; vm[i] -= eps;
@@ -42,14 +58,10 @@ export function positionJacobian(joints, values, eps = 1e-6) {
   return J;
 }
 
-/**
- * Solve position IK. Mutates nothing — returns { values, converged, iterations, error }.
- * Respects each joint's [min, max] limits via clamping.
- */
-export function solveIK(joints, target, options = {}) {
-  const { maxIterations = 200, tolerance = 1e-4, damping = 0.05 } = options;
+/** Single DLS descent from a starting configuration. */
+function iterate(joints, target, startValues, { maxIterations, tolerance, damping }) {
   const n = joints.length;
-  let values = joints.map((j) => j.value);
+  let values = startValues.slice();
 
   for (let iter = 0; iter < maxIterations; iter++) {
     const pos = endPosition(joints, values);
@@ -80,15 +92,52 @@ export function solveIK(joints, target, options = {}) {
     const maxStep = Math.max(...step.map(Math.abs), 1e-9);
     const scale = Math.min(1, 0.5 / maxStep); // cap joint velocity per iteration
 
-    values = values.map((v, i) => {
-      const j = joints[i];
-      return Math.min(j.max, Math.max(j.min, v + step[i] * scale));
-    });
+    values = values.map((v, i) => wrapOrClamp(v + step[i] * scale, joints[i]));
   }
-  const err = Math.hypot(
-    target[0] - endPosition(joints, values)[0],
-    target[1] - endPosition(joints, values)[1],
-    target[2] - endPosition(joints, values)[2],
-  );
+  const pos = endPosition(joints, values);
+  const err = Math.hypot(target[0] - pos[0], target[1] - pos[1], target[2] - pos[2]);
   return { values, converged: false, iterations: maxIterations, error: err };
+}
+
+/** Deterministic pseudo-random seed spread across each joint's range. */
+function seedValues(joints, r) {
+  return joints.map((j, i) => {
+    const h = (Math.sin(r * 12.9898 + i * 78.233) * 43758.5453) % 1;
+    return j.min + (h < 0 ? h + 1 : h) * (j.max - j.min);
+  });
+}
+
+/**
+ * Solve position IK. Returns { values, converged, iterations, error }.
+ *
+ * Strategy: descend from the current configuration first (smooth tracking
+ * for live solving). On failure, restart from structured seeds — flipping
+ * the base joint 180° (the classic wrong-side trap), then deterministic
+ * pseudo-random configurations — and keep the best result.
+ */
+export function solveIK(joints, target, options = {}) {
+  const {
+    maxIterations = 200,
+    tolerance = 1e-4,
+    damping = 0.05,
+    restarts = 6,
+  } = options;
+  const opts = { maxIterations, tolerance, damping };
+
+  let best = iterate(joints, target, joints.map((j) => j.value), opts);
+  if (best.converged) return best;
+
+  // structured restarts: base flip, then sign-flipped configuration
+  const seeds = [
+    joints.map((j, i) => wrapOrClamp(j.value + (i === 0 ? Math.PI : 0), j)),
+    joints.map((j) => wrapOrClamp(-j.value, j)),
+  ];
+  for (let r = 0; r < restarts; r++) seeds.push(seedValues(joints, r));
+
+  for (const seed of seeds) {
+    const res = iterate(joints, target, seed, opts);
+    if (res.converged) return res;
+    if (res.error < best.error) best = res;
+  }
+  return best;
 }
