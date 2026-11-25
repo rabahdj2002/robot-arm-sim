@@ -58,7 +58,8 @@ export class RobotArm {
       new THREE.CylinderGeometry(0.07, 0.09, 0.03, 24),
       new THREE.MeshStandardMaterial({ color: 0x333a4a, metalness: 0.6, roughness: 0.4 }),
     );
-    base.position.y = -0.015;
+    base.rotation.x = Math.PI / 2; // cylinder axis -> local z -> world up
+    base.position.z = -0.015;
     this.group.add(base);
     this.update(joints.map((j) => j.value));
   }
@@ -110,7 +111,14 @@ export class RobotArm {
 
   setTarget(pos) {
     this.targetMarker.visible = pos !== null;
-    if (pos) this.targetMarker.position.set(pos[0], pos[1], pos[2]);
+    if (pos) {
+      // pos is in DH space; the marker lives in the scene, so convert
+      // through the arm group's transform (DH z -> world up)
+      this.group.updateMatrixWorld(true);
+      this.targetMarker.position.copy(
+        this.group.localToWorld(new THREE.Vector3(pos[0], pos[1], pos[2])),
+      );
+    }
   }
 
   setShowFrames(v) {

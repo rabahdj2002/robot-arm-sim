@@ -40,7 +40,7 @@ export class Panel {
       </div>
       <div id="joints"></div>
       <div class="sec">
-        <h3>Inverse Kinematics</h3>
+        <h3>Inverse Kinematics <span class="hint">(DH frame, z = up)</span></h3>
         <div class="grid3">
           <label>X <input id="ik-x" type="number" step="0.01" value="0.25"></label>
           <label>Y <input id="ik-y" type="number" step="0.01" value="0.20"></label>

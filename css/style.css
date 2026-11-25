@@ -21,6 +21,7 @@ main { flex: 1; display: flex; min-height: 0; }
 #panel::-webkit-scrollbar-thumb { background: #232c48; border-radius: 4px; }
 .sec { margin-bottom: 14px; }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #7a86a3; margin-bottom: 8px; }
+h3 .hint { text-transform: none; letter-spacing: 0; font-weight: 400; }
 button, select, input {
   background: #161c30; color: #d8dde8; border: 1px solid #2a3350;
   border-radius: 6px; padding: 6px 10px; font-size: 12px; font-family: inherit;
