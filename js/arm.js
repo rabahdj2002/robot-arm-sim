@@ -65,7 +65,7 @@ export class RobotArm {
   }
 
   /** Rebuild all meshes from joint definitions. */
-  build(joints) {
+  build(joints, collision = null) {
     this.joints = joints;
     disposeDeep(this.group);
     this.group.clear();
@@ -77,11 +77,12 @@ export class RobotArm {
     base.rotation.x = Math.PI / 2; // cylinder axis -> local z -> world up
     base.position.z = -0.015;
     this.group.add(base);
-    this.update(joints.map((j) => j.value));
+    this._links = [];
+    this.update(joints.map((j) => j.value), collision);
   }
 
   /** Recompute FK and reposition every joint/link mesh. */
-  update(values) {
+  update(values, collision = null) {
     if (!this.joints) return;
     const { transforms } = forwardKinematics(this.joints, values);
     const points = transforms.map((t) => {
@@ -95,6 +96,7 @@ export class RobotArm {
       this.group.remove(c);
       disposeDeep(c);
     }
+    this._links = [];
 
     this.joints.forEach((j, i) => {
       const framePoint = points[i]; // joint i sits at frame i's origin (acts about z_{i-1})
@@ -117,8 +119,18 @@ export class RobotArm {
       }
 
       const link = makeLinkMesh(points[i], points[i + 1]);
+      this._links.push(link);
       this.group.add(link);
     });
+
+    // tint colliding links red
+    const hit = new Set();
+    if (collision) {
+      if (collision.type === 'floor') hit.add(collision.link);
+      else { hit.add(collision.linkA); hit.add(collision.linkB); }
+    }
+    this._links.forEach((l, i) =>
+      l.material.color.setHex(hit.has(i) ? 0xff5555 : 0xd8dde8));
 
     // end-effector sphere
     const tip = new THREE.Mesh(

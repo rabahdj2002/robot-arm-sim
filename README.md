@@ -11,6 +11,7 @@ Interactive, browser-based serial robot arm simulator built on the **Denavit–H
 - **Inverse kinematics** — set a target point and solve with damped least-squares (Levenberg–Marquardt) on the position Jacobian; joint limits are respected
 - **Degrees of freedom** — live mobility count (Grübler–Kutzbach reduced for serial chains)
 - **Generated DH table** — the effective parameter table of the current configuration, marked with each joint's variable
+- **Collision limits** — floor-plane and link self-intersection checked in real time (segment–segment distance on link centerlines); joint sliders bisect at the boundary for a "hit the wall" feel, IK solutions that would collide are rejected with a description, and offending links tint red — toggleable
 - **Frame axes overlay** — toggleable RGB axes at every frame to inspect DH frame assignment
 - **Presets** — 2R planar, 3R articulated, SCARA (RRP), PUMA-style 6R
 - **No build step** — static site, three.js via CDN importmap

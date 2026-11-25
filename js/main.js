@@ -31,7 +31,7 @@ let joints = PRESETS['PUMA-style 6R']();
 arm.build(joints);
 
 const panel = new Panel(document.getElementById('panel'), joints, {
-  onChange: () => arm.update(joints.map((j) => j.value)),
+  onChange: (coll) => arm.update(joints.map((j) => j.value), coll),
   onRebuild: () => {
     arm.build(joints);
     panel.updateReadouts();
@@ -40,13 +40,11 @@ const panel = new Panel(document.getElementById('panel'), joints, {
     joints.push(j);
     arm.build(joints);
     panel.renderJoints();
-    panel.updateReadouts();
   },
   onRemoveJoint: (i) => {
     joints.splice(i, 1);
     arm.build(joints);
     panel.renderJoints();
-    panel.updateReadouts();
   },
   onPreset: (newJoints) => {
     joints.length = 0;
@@ -54,7 +52,6 @@ const panel = new Panel(document.getElementById('panel'), joints, {
     panel.joints = joints;
     arm.build(joints);
     panel.renderJoints();
-    panel.updateReadouts();
   },
   onTarget: (pos) => arm.setTarget(pos),
 });

@@ -6,6 +6,7 @@ import {
   makeJoint, JOINT_TYPES, PRESETS,
 } from './dh.js';
 import { solveIK } from './ik.js';
+import { checkCollisions, describeCollision } from './collision.js';
 
 const fmt = (x) => (x >= 0 ? '+' : '') + x.toFixed(4);
 const fmtDeg = (rad) => fmt((rad * 180) / Math.PI) + '°';
@@ -22,6 +23,8 @@ export class Panel {
     this.joints = joints;
     this.hooks = hooks;
     this.target = null;
+    this.collisionEnabled = true;
+    this.lastCollision = null;
     this.render();
   }
 
@@ -57,6 +60,7 @@ export class Panel {
           <input class="tval" data-ax="2" type="number" step="0.01" value="0.15">
         </div>
         <label class="toggle"><input id="ik-live" type="checkbox" checked> arm follows target</label>
+        <label class="toggle"><input id="col-check" type="checkbox" checked> collision limits (floor + self)</label>
         <div class="row">
           <button id="ik-solve">Solve IK</button>
           <button id="ik-clear">Hide target</button>
@@ -66,6 +70,7 @@ export class Panel {
       <div class="sec">
         <h3>Forward Kinematics</h3>
         <div class="dof">DOF: <b id="dof"></b></div>
+        <div id="col-status" class="status"></div>
         <table class="kv">
           <tr><td>Position (m)</td><td id="ee-pos"></td></tr>
           <tr><td>Orientation (RPY)</td><td id="ee-rpy"></td></tr>
@@ -90,14 +95,21 @@ export class Panel {
     const doSolve = () => {
       if (!this.target) return;
       const res = solveIK(this.joints, this.target);
-      this.joints.forEach((j, i) => { j.value = res.values[i]; });
+      const coll = this.collisionEnabled
+        ? checkCollisions(this.joints, res.values)
+        : null;
       const st = this.root.querySelector('#ik-status');
-      st.textContent = res.converged
-        ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)})`
-        : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)`;
-      st.className = 'status ' + (res.converged ? 'ok' : 'warn');
+      if (coll) {
+        st.textContent = `blocked — ${describeCollision(coll)}`;
+        st.className = 'status warn';
+      } else {
+        this.joints.forEach((j, i) => { j.value = res.values[i]; });
+        st.textContent = res.converged
+          ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)})`
+          : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)`;
+        st.className = 'status ' + (res.converged ? 'ok' : 'warn');
+      }
       this.renderJoints();
-      this.hooks.onChange();
     };
     // throttle live solves to once per animation frame during slider drags
     const liveSolve = () => {
@@ -118,6 +130,10 @@ export class Panel {
         liveSolve();
       }));
     this.root.querySelector('#ik-solve').addEventListener('click', doSolve);
+    this.root.querySelector('#col-check').addEventListener('change', (e) => {
+      this.collisionEnabled = e.target.checked;
+      this.updateReadouts();
+    });
     this.root.querySelector('#ik-clear').addEventListener('click', () => {
       this.hooks.onTarget(null);
       this.root.querySelector('#ik-status').textContent = '';
@@ -169,10 +185,32 @@ export class Panel {
       const slider = card.querySelector('.qslider');
       const num = card.querySelector('.qval');
       const setVal = (v) => {
-        j.value = Math.min(j.max, Math.max(j.min, v));
+        const prev = j.value;
+        const wanted = Math.min(j.max, Math.max(j.min, v));
+        let blocked = false;
+        if (this.collisionEnabled && wanted !== prev) {
+          j.value = wanted;
+          if (checkCollisions(this.joints)) {
+            // bisect back toward prev -> the joint moves until it "hits the wall"
+            let lo = prev, hi = wanted;
+            for (let k = 0; k < 8; k++) {
+              const mid = (lo + hi) / 2;
+              j.value = mid;
+              if (checkCollisions(this.joints)) hi = mid; else lo = mid;
+            }
+            j.value = lo;
+            blocked = true;
+          }
+        } else {
+          j.value = wanted;
+        }
         slider.value = j.value; num.value = j.value.toFixed(3);
         this.updateReadouts();
-        this.hooks.onChange();
+        if (blocked) {
+          const el = this.root.querySelector('#col-status');
+          el.textContent = 'move blocked — collision';
+          el.className = 'status warn';
+        }
       };
       slider.addEventListener('input', (e) => setVal(parseFloat(e.target.value)));
       num.addEventListener('change', (e) => setVal(parseFloat(e.target.value) || 0));
@@ -202,5 +240,17 @@ export class Panel {
       rows.map((t) =>
         `<tr><td>${t.joint}</td><td>${t.theta.toFixed(2)}</td><td>${t.d.toFixed(2)}</td>` +
         `<td>${t.a.toFixed(2)}</td><td>${t.alpha.toFixed(2)}</td><td>${t.variable}</td></tr>`).join('');
+
+    // collision badge + notify renderer (tints links, refreshes pose)
+    const coll = this.collisionEnabled ? checkCollisions(this.joints) : null;
+    this.lastCollision = coll;
+    const el = this.root.querySelector('#col-status');
+    if (coll) {
+      el.textContent = '⚠ ' + describeCollision(coll);
+      el.className = 'status warn';
+    } else if (el.textContent.startsWith('⚠')) {
+      el.textContent = '';
+    }
+    this.hooks.onChange(coll);
   }
 }
