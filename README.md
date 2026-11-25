@@ -2,13 +2,13 @@
 
 Interactive, browser-based serial robot arm simulator built on the **Denavit–Hartenberg (DH) convention**. Define an arbitrary chain of revolute and prismatic joints and get real-time forward kinematics, the generated DH table, mobility count, and numerical inverse kinematics — all in the 3D viewport.
 
-**Live demo:** https://rabahdj2002.github.io/robot-arm-sim/
+**Live demo:** https://rabahdj2002.github.io/robot-arm-sim/ · **Docs:** https://rabahdj2002.github.io/robot-arm-sim-docs/ · **Tests:** [`tests/`](tests/)
 
 ## Features
 
 - **Free-form chain editor** — add/remove revolute and prismatic joints, edit every DH parameter (`θ₀`, `d`, `a`, `α`) per joint
 - **Real-time forward kinematics** — joint sliders drive the pose; end-effector position (XYZ) and orientation (RPY) update live
-- **Inverse kinematics** — set a target point and solve with damped least-squares (Levenberg–Marquardt) on the position Jacobian; joint limits are respected
+- **Inverse kinematics** — set a target point and solve with damped least-squares + cyclic coordinate descent restarts; joint limits respected, and the solver prefers a collision-free branch when several configurations reach the same target
 - **Degrees of freedom** — live mobility count (Grübler–Kutzbach reduced for serial chains)
 - **Generated DH table** — the effective parameter table of the current configuration, marked with each joint's variable
 - **Collision limits** — floor-plane and link self-intersection checked in real time (segment–segment distance on link centerlines); joint sliders bisect at the boundary for a "hit the wall" feel, IK solutions that would collide are rejected with a description, and offending links tint red — toggleable
@@ -26,7 +26,7 @@ A_i = Rot_z(θ_i) · Trans_z(d_i) · Trans_x(a_i) · Rot_x(α_i)
 
 The joint variable `q_i` is `θ_i` for revolute and `d_i` for prismatic joints. End-effector pose: `T_0^n = A_1 · A_2 · … · A_n`.
 
-**IK (position only):** iterative damped least squares — `Δq = Jᵀ(JJᵀ + λ²I)⁻¹ e` — where `J` is the 3×n position Jacobian computed by central finite differences. Converges for any serial chain, including redundant and under-actuated configurations (best-effort with residual reporting). Closed-form IK does not exist for arbitrary DH configurations, which is exactly why the numerical approach is used.
+**IK (position only):** iterative damped least squares — `Δq = Jᵀ(JJᵀ + λ²I)⁻¹ e` — where `J` is the 3×n position Jacobian computed by central finite differences, with a cyclic coordinate descent second engine and structured restarts (azimuth seeds, branch flips, pseudo-randoms). A `validate(q)` predicate lets the collision check steer the solver toward a collision-free branch. Converges for any serial chain (best-effort with residual reporting) — closed-form IK does not exist for arbitrary DH configurations. Full detail: [docs site](https://rabahdj2002.github.io/robot-arm-sim-docs/).
 
 ## Run locally
 
