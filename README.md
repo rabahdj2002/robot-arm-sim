@@ -4,8 +4,6 @@ Interactive, browser-based serial robot arm simulator built on the **Denavit–H
 
 **Live demo:** https://rabahdj2002.github.io/robot-arm-sim/
 
-![screenshot](docs/screenshot.png)
-
 ## Features
 
 - **Free-form chain editor** — add/remove revolute and prismatic joints, edit every DH parameter (`θ₀`, `d`, `a`, `α`) per joint
