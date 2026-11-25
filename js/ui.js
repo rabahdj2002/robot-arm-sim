@@ -25,6 +25,9 @@ export class Panel {
     this.target = null;
     this.collisionEnabled = true;
     this.lastCollision = null;
+    this._animGoal = null;   // IK solution being eased toward
+    this._animRaf = null;
+    this._els = [];          // {slider, num} per joint for in-place sync
     this.render();
   }
 
@@ -111,14 +114,17 @@ export class Panel {
           ? `all branches collide — ${describeCollision(coll)}`
           : `blocked — ${describeCollision(coll)}`;
         st.className = 'status warn';
+        this.renderJoints();
       } else {
-        this.joints.forEach((j, i) => { j.value = res.values[i]; });
         st.textContent = res.converged
           ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)})`
           : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)`;
         st.className = 'status ' + (res.converged ? 'ok' : 'warn');
+        // Ease toward the solution — the follower does the actual writes
+        // per frame so joints glide instead of snapping.
+        this._animGoal = res.values;
+        this._pumpAnim();
       }
-      this.renderJoints();
     };
     // throttle live solves to once per animation frame during slider drags
     const liveSolve = () => {
@@ -153,9 +159,52 @@ export class Panel {
     this.updateReadouts();
   }
 
+  /**
+   * Glide joints toward the last accepted IK goal — exponential approach
+   * in joint space (~0.6 s settle) along the shortest path, wrap-aware
+   * across ±π for full-rotation revolute joints. Live-drag solves keep
+   * re-targeting the same follower so tracking stays continuous.
+   */
+  _pumpAnim() {
+    if (this._animRaf) return;
+    let last = performance.now();
+    const step = () => {
+      this._animRaf = null;
+      const goal = this._animGoal;
+      if (!goal || goal.length !== this.joints.length) return;
+      const now = performance.now();
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const k = 1 - Math.exp(-7 * dt);
+      let maxD = 0;
+      this.joints.forEach((j, i) => {
+        const span = j.max - j.min;
+        const unbounded = j.type === 'revolute' && span >= 2 * Math.PI - 1e-9;
+        let d = goal[i] - j.value;
+        if (unbounded) d = ((d + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+        maxD = Math.max(maxD, Math.abs(d));
+        j.value += d * k;
+        if (unbounded) j.value = j.min + ((((j.value - j.min) % span) + span) % span);
+        const el = this._els[i];
+        if (el) { el.slider.value = j.value; el.num.value = j.value.toFixed(3); }
+      });
+      this.updateReadouts();
+      if (maxD > 0.002) {
+        this._animRaf = requestAnimationFrame(step);
+      } else {
+        this.joints.forEach((j, i) => { j.value = goal[i]; });
+        this._animGoal = null;
+        this.updateReadouts();
+        this.renderJoints();
+      }
+    };
+    this._animRaf = requestAnimationFrame(step);
+  }
+
   renderJoints() {
     const host = this.root.querySelector('#joints');
     host.innerHTML = '';
+    this._els = [];
     this.joints.forEach((j, i) => {
       const card = document.createElement('div');
       card.className = `joint-card t-${j.type === 'prismatic' ? 'pris' : 'rev'}`;
@@ -199,7 +248,9 @@ export class Panel {
 
       const slider = card.querySelector('.qslider');
       const num = card.querySelector('.qval');
+      this._els[i] = { slider, num };
       const setVal = (v) => {
+        this._animGoal = null; // user grabbed a slider — cancel IK glide
         const prev = j.value;
         const wanted = Math.min(j.max, Math.max(j.min, v));
         let blocked = false;
