@@ -90,6 +90,31 @@ test('IK restarts escape a bad local minimum (6R)', () => {
   assert.ok(res.error < 0.01, `residual ${res.error}`);
 });
 
+test('IK readjusts a base joint parked on the wrong side', () => {
+  // 3R articulated: vertical base + two planar links
+  const joints = [
+    makeJoint('revolute', { a: 0, d: 0.2, alpha: Math.PI / 2, value: 2.8 }), // parked wrong
+    makeJoint('revolute', { a: 0.25 }),
+    makeJoint('revolute', { a: 0.2 }),
+  ];
+  const res = solveIK(joints, [-0.3, -0.15, 0.15]);
+  assert.ok(res.converged, `failed to converge, err=${res.error}`);
+  const p = getPosition(forwardKinematics(joints, res.values).endEffector);
+  assert.ok(near(p[0], -0.3, 1e-3));
+  assert.ok(near(p[1], -0.15, 1e-3));
+  assert.ok(near(p[2], 0.15, 1e-3));
+});
+
+test('IK flips elbow branch when target needs the other side', () => {
+  const joints = reach2R();
+  joints[1].value = 2.5; // elbow bent the "wrong" way for this target
+  const res = solveIK(joints, [0.45, 0.1, 0]);
+  assert.ok(res.converged, `failed to converge, err=${res.error}`);
+  const p = getPosition(forwardKinematics(joints, res.values).endEffector);
+  assert.ok(near(p[0], 0.45, 1e-3));
+  assert.ok(near(p[1], 0.1, 1e-3));
+});
+
 test('solved values always respect restricted joint limits', () => {
   const joints = reach2R();
   joints[0].min = -1.0; joints[0].max = 1.0; // real sub-2π limit

@@ -99,6 +99,56 @@ function iterate(joints, target, startValues, { maxIterations, tolerance, dampin
   return { values, converged: false, iterations: maxIterations, error: err };
 }
 
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vcross = (a, b) => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+const vnorm = (a) => Math.hypot(a[0], a[1], a[2]);
+const vscale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const vclamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * Cyclic Coordinate Descent — geometric IK. Each joint (tip to base) is
+ * rotated about its axis to align the joint->EE and joint->target vectors.
+ * Escapes wrong-branch configurations that pure gradient descent can't.
+ */
+function ccdIterate(joints, target, startValues, { maxIterations, tolerance }) {
+  const n = joints.length;
+  let values = startValues.slice();
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    const ee0 = endPosition(joints, values);
+    const errNorm = vnorm(vsub(target, ee0));
+    if (errNorm < tolerance) {
+      return { values, converged: true, iterations: iter, error: errNorm };
+    }
+    for (let i = n - 1; i >= 0; i--) {
+      const { transforms } = forwardKinematics(joints, values);
+      const jp = getPosition(transforms[i]);
+      const z = [transforms[i][0][2], transforms[i][1][2], transforms[i][2][2]];
+      const ee = getPosition(transforms[n]);
+      const vE = vsub(ee, jp), vT = vsub(target, jp);
+      if (joints[i].type === JOINT_TYPES.PRISMATIC) {
+        values[i] = wrapOrClamp(values[i] + (vdot(vT, z) - vdot(vE, z)), joints[i]);
+      } else {
+        // rotate about the joint axis so vE aligns with vT
+        const pE = vsub(vE, vscale(z, vdot(vE, z)));
+        const pT = vsub(vT, vscale(z, vdot(vT, z)));
+        const nE = vnorm(pE), nT = vnorm(pT);
+        if (nE < 1e-9 || nT < 1e-9) continue;
+        const cosA = vclamp(vdot(pE, pT) / (nE * nT), -1, 1);
+        const s = vdot(z, vcross(pE, pT)) >= 0 ? 1 : -1;
+        values[i] = wrapOrClamp(values[i] + s * Math.acos(cosA) * 0.8, joints[i]);
+      }
+    }
+  }
+  const err = vnorm(vsub(target, endPosition(joints, values)));
+  return { values, converged: false, iterations: maxIterations, error: err };
+}
+
 /** Deterministic pseudo-random seed spread across each joint's range. */
 function seedValues(joints, r) {
   return joints.map((j, i) => {
@@ -121,23 +171,37 @@ export function solveIK(joints, target, options = {}) {
     tolerance = 1e-4,
     damping = 0.05,
     restarts = 6,
+    budgetMs = 60,
   } = options;
   const opts = { maxIterations, tolerance, damping };
+  const cur = joints.map((j) => j.value);
 
-  let best = iterate(joints, target, joints.map((j) => j.value), opts);
-  if (best.converged) return best;
-
-  // structured restarts: base flip, then sign-flipped configuration
+  // Seed the base revolute joint directly at the target azimuth (and its
+  // opposite) — the cheap way out of the classic "base parked on the
+  // wrong side" trap instead of hoping random restarts find the flip.
+  const az = Math.atan2(target[1], target[0]);
+  const reseedBase = (q) =>
+    joints.map((j, i) =>
+      i === 0 && j.type === JOINT_TYPES.REVOLUTE ? wrapOrClamp(q, j) : j.value);
   const seeds = [
-    joints.map((j, i) => wrapOrClamp(j.value + (i === 0 ? Math.PI : 0), j)),
+    cur,
+    reseedBase(az),
+    reseedBase(az + Math.PI),
+    reseedBase(cur[0] + Math.PI),
     joints.map((j) => wrapOrClamp(-j.value, j)),
   ];
   for (let r = 0; r < restarts; r++) seeds.push(seedValues(joints, r));
 
+  const deadline = Date.now() + budgetMs;
+  let best = null;
   for (const seed of seeds) {
-    const res = iterate(joints, target, seed, opts);
-    if (res.converged) return res;
-    if (res.error < best.error) best = res;
+    // CCD first — geometric and cheap; DLS refines when it misses
+    for (const solve of [ccdIterate, iterate]) {
+      const res = solve(joints, target, seed.slice(), opts);
+      if (res.converged) return res;
+      if (!best || res.error < best.error) best = res;
+    }
+    if (Date.now() > deadline) break;
   }
   return best;
 }
