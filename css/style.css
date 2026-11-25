@@ -43,8 +43,8 @@ button:hover { background: #1e2742; border-color: #3a4a75; }
 .del { padding: 2px 9px; color: #ff7b7b; }
 .q-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
 .q-label { font-size: 11px; color: #9aa5c0; width: 52px; }
-.qslider { flex: 1; padding: 0; accent-color: #4da3ff; }
-.qval { width: 74px; }
+.qslider, .tslider { flex: 1; padding: 0; accent-color: #4da3ff; }
+.qval, .tval { width: 74px; }
 .params { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
 .params label { font-size: 10px; color: #7a86a3; display: flex; flex-direction: column; gap: 2px; }
 .params input { padding: 4px 6px; font-size: 11px; width: 100%; }

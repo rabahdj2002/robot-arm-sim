@@ -47,6 +47,10 @@ export class RobotArm {
     );
     this.targetMarker.visible = false;
     this.scene.add(this.targetMarker);
+    // axis arrows showing the DH frame directions at the target
+    this.targetAxes = new THREE.AxesHelper(0.12);
+    this.targetAxes.visible = false;
+    this.scene.add(this.targetAxes);
   }
 
   /** Rebuild all meshes from joint definitions. */
@@ -111,13 +115,15 @@ export class RobotArm {
 
   setTarget(pos) {
     this.targetMarker.visible = pos !== null;
+    this.targetAxes.visible = pos !== null;
     if (pos) {
       // pos is in DH space; the marker lives in the scene, so convert
       // through the arm group's transform (DH z -> world up)
       this.group.updateMatrixWorld(true);
-      this.targetMarker.position.copy(
-        this.group.localToWorld(new THREE.Vector3(pos[0], pos[1], pos[2])),
-      );
+      const wp = this.group.localToWorld(new THREE.Vector3(pos[0], pos[1], pos[2]));
+      this.targetMarker.position.copy(wp);
+      this.targetAxes.position.copy(wp);
+      this.targetAxes.quaternion.copy(this.group.quaternion);
     }
   }
 

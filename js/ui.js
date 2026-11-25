@@ -41,14 +41,25 @@ export class Panel {
       <div id="joints"></div>
       <div class="sec">
         <h3>Inverse Kinematics <span class="hint">(DH frame, z = up)</span></h3>
-        <div class="grid3">
-          <label>X <input id="ik-x" type="number" step="0.01" value="0.25"></label>
-          <label>Y <input id="ik-y" type="number" step="0.01" value="0.20"></label>
-          <label>Z <input id="ik-z" type="number" step="0.01" value="0.15"></label>
+        <div class="q-row">
+          <span class="q-label">X (m)</span>
+          <input class="tslider" data-ax="0" type="range" min="-0.6" max="0.6" step="0.005" value="0.25">
+          <input class="tval" data-ax="0" type="number" step="0.01" value="0.25">
         </div>
+        <div class="q-row">
+          <span class="q-label">Y (m)</span>
+          <input class="tslider" data-ax="1" type="range" min="-0.6" max="0.6" step="0.005" value="0.2">
+          <input class="tval" data-ax="1" type="number" step="0.01" value="0.2">
+        </div>
+        <div class="q-row">
+          <span class="q-label">Z (m)</span>
+          <input class="tslider" data-ax="2" type="range" min="-0.1" max="0.8" step="0.005" value="0.15">
+          <input class="tval" data-ax="2" type="number" step="0.01" value="0.15">
+        </div>
+        <label class="toggle"><input id="ik-live" type="checkbox" checked> arm follows target</label>
         <div class="row">
           <button id="ik-solve">Solve IK</button>
-          <button id="ik-clear">Clear target</button>
+          <button id="ik-clear">Hide target</button>
         </div>
         <div id="ik-status" class="status"></div>
       </div>
@@ -75,34 +86,43 @@ export class Panel {
     this.root.querySelector('#add-pris').addEventListener('click', () =>
       this.hooks.onAddJoint(makeJoint(JOINT_TYPES.PRISMATIC)));
 
-    const readTarget = () => [
-      parseFloat(this.root.querySelector('#ik-x').value) || 0,
-      parseFloat(this.root.querySelector('#ik-y').value) || 0,
-      parseFloat(this.root.querySelector('#ik-z').value) || 0,
-    ];
-    this.root.querySelector('#ik-solve').addEventListener('click', () => {
-      this.target = readTarget();
-      this.hooks.onTarget(this.target);
+    this.target = [0.25, 0.2, 0.15];
+    const doSolve = () => {
+      if (!this.target) return;
       const res = solveIK(this.joints, this.target);
       this.joints.forEach((j, i) => { j.value = res.values[i]; });
       const st = this.root.querySelector('#ik-status');
       st.textContent = res.converged
         ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)})`
-        : `Best effort — residual ${res.error.toFixed(3)} m (target may be out of reach)`;
+        : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)`;
       st.className = 'status ' + (res.converged ? 'ok' : 'warn');
       this.renderJoints();
       this.hooks.onChange();
-    });
+    };
+    // throttle live solves to once per animation frame during slider drags
+    const liveSolve = () => {
+      if (this._ikRaf || !this.root.querySelector('#ik-live').checked) return;
+      this._ikRaf = requestAnimationFrame(() => {
+        this._ikRaf = null;
+        doSolve();
+      });
+    };
+    this.root.querySelectorAll('.tslider,.tval').forEach((inp) =>
+      inp.addEventListener('input', () => {
+        const ax = +inp.dataset.ax;
+        this.target[ax] = parseFloat(inp.value) || 0;
+        this.root.querySelectorAll(`[data-ax="${ax}"]`).forEach((o) => {
+          if (o !== inp) o.value = inp.value;
+        });
+        this.hooks.onTarget(this.target);
+        liveSolve();
+      }));
+    this.root.querySelector('#ik-solve').addEventListener('click', doSolve);
     this.root.querySelector('#ik-clear').addEventListener('click', () => {
-      this.target = null;
       this.hooks.onTarget(null);
       this.root.querySelector('#ik-status').textContent = '';
     });
-    ['ik-x', 'ik-y', 'ik-z'].forEach((id) =>
-      this.root.querySelector('#' + id).addEventListener('input', () => {
-        this.target = readTarget();
-        this.hooks.onTarget(this.target);
-      }));
+    this.hooks.onTarget(this.target); // show marker + axes on load
 
     this.renderJoints();
     this.updateReadouts();
