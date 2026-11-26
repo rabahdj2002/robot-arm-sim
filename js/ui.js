@@ -7,6 +7,8 @@ import {
 } from './dh.js';
 import { solveIK } from './ik.js';
 import { checkCollisions, describeCollision } from './collision.js';
+import { trajectoryAt, wrapDelta } from './trajectory.js';
+import { shareUrl } from './config.js';
 
 const fmt = (x) => (x >= 0 ? '+' : '') + x.toFixed(4);
 const fmtDeg = (rad) => fmt((rad * 180) / Math.PI) + '°';
@@ -28,6 +30,9 @@ export class Panel {
     this._animGoal = null;   // IK solution being eased toward
     this._animRaf = null;
     this._els = [];          // {slider, num} per joint for in-place sync
+    this.waypoints = [];     // recorded joint poses for trajectory playback
+    this._trajRaf = null;
+    this._trajOn = false;
     this.render();
   }
 
@@ -42,6 +47,9 @@ export class Panel {
         <div class="row">
           <button id="add-rev">+ Revolute</button>
           <button id="add-pris">+ Prismatic</button>
+        </div>
+        <div class="row">
+          <button id="share-cfg">Copy share link</button>
         </div>
       </div>
       <div id="joints"></div>
@@ -71,6 +79,20 @@ export class Panel {
         <div id="ik-status" class="status"></div>
       </div>
       <div class="sec">
+        <h3>Trajectory <span class="hint" id="traj-count"></span></h3>
+        <div class="row">
+          <button id="traj-add">+ Waypoint</button>
+          <button id="traj-play" class="primary">Play</button>
+          <button id="traj-stop">Stop</button>
+        </div>
+        <div class="row">
+          <button id="traj-clear">Clear</button>
+          <label class="toggle" style="margin-top:0;flex:1;justify-content:flex-end"><input id="traj-loop" type="checkbox" checked> loop</label>
+        </div>
+        <label class="toggle"><input id="trail-check" type="checkbox"> EE trail</label>
+        <label class="toggle"><input id="ws-check" type="checkbox"> workspace cloud</label>
+      </div>
+      <div class="sec">
         <h3>Forward Kinematics</h3>
         <div class="dof">DOF: <b id="dof"></b></div>
         <div id="col-status" class="status"></div>
@@ -94,9 +116,38 @@ export class Panel {
     this.root.querySelector('#add-pris').addEventListener('click', () =>
       this.hooks.onAddJoint(makeJoint(JOINT_TYPES.PRISMATIC)));
 
+    const shareBtn = this.root.querySelector('#share-cfg');
+    shareBtn.addEventListener('click', () => {
+      navigator.clipboard?.writeText(shareUrl(this.joints));
+      shareBtn.textContent = 'Link copied';
+      setTimeout(() => { shareBtn.textContent = 'Copy share link'; }, 1200);
+    });
+
+    // trajectory record / playback
+    this._trajUpdateCount = () => {
+      this.root.querySelector('#traj-count').textContent =
+        this.waypoints.length ? `${this.waypoints.length} wp` : '';
+    };
+    this.root.querySelector('#traj-add').addEventListener('click', () => {
+      this.waypoints.push(this.joints.map((j) => j.value));
+      this._trajUpdateCount();
+    });
+    this.root.querySelector('#traj-play').addEventListener('click', () => this.playTrajectory());
+    this.root.querySelector('#traj-stop').addEventListener('click', () => this.stopTrajectory());
+    this.root.querySelector('#traj-clear').addEventListener('click', () => {
+      this.stopTrajectory();
+      this.waypoints = [];
+      this._trajUpdateCount();
+    });
+    this.root.querySelector('#trail-check').addEventListener('change', (e) =>
+      this.hooks.onTrail(e.target.checked));
+    this.root.querySelector('#ws-check').addEventListener('change', (e) =>
+      this.hooks.onWorkspace(e.target.checked));
+
     this.target = [0.25, 0.2, 0.15];
     const doSolve = () => {
       if (!this.target) return;
+      this.stopTrajectory(); // IK supersedes waypoint playback
       // Hand the solver the collision predicate — it keeps retrying other
       // seeds/branches until it finds a converged solution that also
       // doesn't collide, instead of rejecting the first branch it finds.
@@ -128,7 +179,7 @@ export class Panel {
     };
     // throttle live solves to once per animation frame during slider drags
     const liveSolve = () => {
-      if (this._ikRaf || !this.root.querySelector('#ik-live').checked) return;
+      if (this._ikRaf || this._trajOn || !this.root.querySelector('#ik-live').checked) return;
       this._ikRaf = requestAnimationFrame(() => {
         this._ikRaf = null;
         doSolve();
@@ -144,6 +195,7 @@ export class Panel {
         this.hooks.onTarget(this.target);
         liveSolve();
       }));
+    this._liveSolve = liveSolve;
     this.root.querySelector('#ik-solve').addEventListener('click', doSolve);
     this.root.querySelector('#col-check').addEventListener('change', (e) => {
       this.collisionEnabled = e.target.checked;
@@ -180,8 +232,7 @@ export class Panel {
       this.joints.forEach((j, i) => {
         const span = j.max - j.min;
         const unbounded = j.type === 'revolute' && span >= 2 * Math.PI - 1e-9;
-        let d = goal[i] - j.value;
-        if (unbounded) d = ((d + Math.PI) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
+        const d = wrapDelta(j.value, goal[i], j);
         maxD = Math.max(maxD, Math.abs(d));
         j.value += d * k;
         if (unbounded) j.value = j.min + ((((j.value - j.min) % span) + span) % span);
@@ -199,6 +250,50 @@ export class Panel {
       }
     };
     this._animRaf = requestAnimationFrame(step);
+  }
+
+  /** Set the IK target from outside the panel (e.g. viewport drag). */
+  setTarget(x, y, z) {
+    this.target = [
+      Math.min(0.6, Math.max(-0.6, x)),
+      Math.min(0.6, Math.max(-0.6, y)),
+      Math.min(0.8, Math.max(-0.1, z)),
+    ];
+    this.root.querySelectorAll('[data-ax]').forEach((o) => {
+      o.value = +this.target[+o.dataset.ax].toFixed(3);
+    });
+    this.hooks.onTarget(this.target);
+    this._liveSolve?.();
+  }
+
+  playTrajectory() {
+    if (this._trajOn || !this.waypoints.length) return;
+    this._animGoal = null;
+    this._trajOn = true;
+    const loop = this.root.querySelector('#traj-loop').checked;
+    const segSec = 1.6;
+    const total = segSec * (loop ? this.waypoints.length : this.waypoints.length - 1);
+    const t0 = performance.now();
+    const step = () => {
+      this._trajRaf = null;
+      const t = (performance.now() - t0) / 1000;
+      const vals = trajectoryAt(this.waypoints, this.joints, t, segSec, loop);
+      if (!vals || (!loop && t > total)) { this.stopTrajectory(); return; }
+      this.joints.forEach((j, i) => {
+        j.value = vals[i];
+        const el = this._els[i];
+        if (el) { el.slider.value = j.value; el.num.value = j.value.toFixed(3); }
+      });
+      this.updateReadouts();
+      this._trajRaf = requestAnimationFrame(step);
+    };
+    this._trajRaf = requestAnimationFrame(step);
+  }
+
+  stopTrajectory() {
+    this._trajOn = false;
+    if (this._trajRaf) cancelAnimationFrame(this._trajRaf);
+    this._trajRaf = null;
   }
 
   renderJoints() {
@@ -250,7 +345,8 @@ export class Panel {
       const num = card.querySelector('.qval');
       this._els[i] = { slider, num };
       const setVal = (v) => {
-        this._animGoal = null; // user grabbed a slider — cancel IK glide
+        this._animGoal = null; // user grabbed a slider — cancel IK glide + playback
+        this.stopTrajectory();
         const prev = j.value;
         const wanted = Math.min(j.max, Math.max(j.min, v));
         let blocked = false;

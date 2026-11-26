@@ -62,6 +62,34 @@ export class RobotArm {
     this.targetAxes = new THREE.AxesHelper(0.12);
     this.targetAxes.visible = false;
     this.scene.add(this.targetAxes);
+
+    // EE trail — ring buffer of world-space tip positions, fading line
+    this._trailMax = 1500;
+    this._trailPts = [];
+    this._trailGeo = new THREE.BufferGeometry();
+    this._trailGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(this._trailMax * 3), 3));
+    this._trailGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(this._trailMax * 3), 3));
+    this._trailGeo.setDrawRange(0, 0);
+    this.trail = new THREE.Line(
+      this._trailGeo,
+      new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending }),
+    );
+    this.trail.frustumCulled = false;
+    this.trail.visible = false;
+    this.scene.add(this.trail);
+
+    // Workspace envelope — additive point cloud of reachable positions
+    this._wsGeo = new THREE.BufferGeometry();
+    this.workspaceCloud = new THREE.Points(
+      this._wsGeo,
+      new THREE.PointsMaterial({
+        color: 0x35b9d8, size: 0.006, transparent: true, opacity: 0.28,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      }),
+    );
+    this.workspaceCloud.frustumCulled = false;
+    this.workspaceCloud.visible = false;
+    this.scene.add(this.workspaceCloud);
   }
 
   /** Rebuild all meshes from joint definitions. */
@@ -148,6 +176,50 @@ export class RobotArm {
     );
     tip.position.copy(points[points.length - 1]);
     this.group.add(tip);
+
+    // append tip position to the trail (world space)
+    if (this.trail.visible && this._lastTip !== undefined) {
+      const wp = this.group.localToWorld(points[points.length - 1].clone());
+      const last = this._trailPts[this._trailPts.length - 1];
+      if (!last || last.distanceToSquared(wp) > 4e-6) {
+        this._trailPts.push(wp);
+        if (this._trailPts.length > this._trailMax) this._trailPts.shift();
+        const pos = this._trailGeo.attributes.position.array;
+        const col = this._trailGeo.attributes.color.array;
+        const n = this._trailPts.length;
+        for (let k = 0; k < n; k++) {
+          pos[k * 3] = this._trailPts[k].x;
+          pos[k * 3 + 1] = this._trailPts[k].y;
+          pos[k * 3 + 2] = this._trailPts[k].z;
+          const f = (k / Math.max(1, n - 1)) ** 1.5; // fade old -> bright new
+          col[k * 3] = 0.1 * f;
+          col[k * 3 + 1] = 0.75 * f;
+          col[k * 3 + 2] = 0.9 * f;
+        }
+        this._trailGeo.setDrawRange(0, n);
+        this._trailGeo.attributes.position.needsUpdate = true;
+        this._trailGeo.attributes.color.needsUpdate = true;
+      }
+    }
+    this._lastTip = points[points.length - 1];
+  }
+
+  setTrail(v) {
+    this.trail.visible = v;
+    if (v) { this._trailPts = []; this._trailGeo.setDrawRange(0, 0); }
+  }
+
+  /** Show/hide the reachable-workspace cloud. positions = world-space xyz triples. */
+  setWorkspace(positions) {
+    if (!positions) { this.workspaceCloud.visible = false; return; }
+    this._wsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.workspaceCloud.visible = true;
+  }
+
+  /** Convert a world-space point into the arm's DH coordinate space. */
+  worldToDH(v) {
+    this.group.updateMatrixWorld(true);
+    return this.group.worldToLocal(v.clone());
   }
 
   setTarget(pos) {

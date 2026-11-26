@@ -3,6 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RobotArm } from './arm.js';
 import { Panel } from './ui.js';
 import { PRESETS } from './dh.js';
+import { configFromHash } from './config.js';
+import { sampleWorkspace } from './workspace.js';
 
 const canvas = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -34,7 +36,8 @@ const grid = new THREE.GridHelper(2, 20, 0x2a3350, 0x1d2438);
 scene.add(grid);
 
 const arm = new RobotArm(scene);
-let joints = PRESETS['PUMA-style 6R']();
+// shared-link config takes precedence over the default preset
+let joints = configFromHash(location.hash) || PRESETS['PUMA-style 6R']();
 arm.build(joints);
 
 const panel = new Panel(document.getElementById('panel'), joints, {
@@ -61,6 +64,20 @@ const panel = new Panel(document.getElementById('panel'), joints, {
     panel.renderJoints();
   },
   onTarget: (pos) => arm.setTarget(pos),
+  onTrail: (v) => arm.setTrail(v),
+  onWorkspace: (v) => {
+    if (!v) { arm.setWorkspace(null); return; }
+    const pts = sampleWorkspace(joints, 14000);
+    const world = new Float32Array(pts.length);
+    const tmp = new THREE.Vector3();
+    arm.group.updateMatrixWorld(true);
+    for (let i = 0; i < pts.length; i += 3) {
+      tmp.set(pts[i], pts[i + 1], pts[i + 2]);
+      arm.group.localToWorld(tmp);
+      world[i] = tmp.x; world[i + 1] = tmp.y; world[i + 2] = tmp.z;
+    }
+    arm.setWorkspace(world);
+  },
 });
 
 document.getElementById('frames-toggle').addEventListener('change', (e) => arm.setShowFrames(e.target.checked));
@@ -71,6 +88,53 @@ document.getElementById('reset-view').addEventListener('click', () => {
   controls.target.set(...HOME_TGT);
   controls.update();
 });
+
+// --- drag the IK target marker in the viewport ---
+const ray = new THREE.Raycaster();
+const ptr = new THREE.Vector2();
+const dragPlane = new THREE.Plane();
+let dragging = false;
+
+const setPtr = (e) =>
+  ptr.set((e.offsetX / canvas.clientWidth) * 2 - 1, -(e.offsetY / canvas.clientHeight) * 2 + 1);
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!arm.targetMarker.visible) return;
+  setPtr(e);
+  ray.setFromCamera(ptr, camera);
+  if (!ray.intersectObject(arm.targetMarker, false).length) return;
+  dragging = true;
+  controls.enabled = false;
+  canvas.setPointerCapture(e.pointerId);
+  // drag on a camera-facing plane through the marker
+  dragPlane.setFromNormalAndCoplanarPoint(
+    camera.getWorldDirection(new THREE.Vector3()).negate(),
+    arm.targetMarker.position,
+  );
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  setPtr(e);
+  ray.setFromCamera(ptr, camera);
+  if (!dragging) {
+    canvas.style.cursor =
+      arm.targetMarker.visible && ray.intersectObject(arm.targetMarker, false).length
+        ? 'grab' : '';
+    return;
+  }
+  const hit = new THREE.Vector3();
+  if (ray.ray.intersectPlane(dragPlane, hit)) {
+    const dh = arm.worldToDH(hit);
+    panel.setTarget(dh.x, dh.y, dh.z);
+  }
+});
+
+window.addEventListener('pointerup', () => {
+  if (dragging) { dragging = false; controls.enabled = true; }
+});
+
+// debug/test handle (harmless in prod — enables e2e checks)
+window.__sim = { arm, panel, camera, controls, scene };
 
 function resize() {
   const w = canvas.clientWidth, h = canvas.clientHeight;
