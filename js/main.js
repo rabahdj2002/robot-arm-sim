@@ -4,7 +4,7 @@ import { RobotArm } from './arm.js';
 import { Panel } from './ui.js';
 import { PRESETS } from './dh.js';
 import { configFromHash } from './config.js';
-import { sampleWorkspace } from './workspace.js';
+import { sampleWorkspace, workspaceShell } from './workspace.js';
 
 const canvas = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -67,16 +67,17 @@ const panel = new Panel(document.getElementById('panel'), joints, {
   onTrail: (v) => arm.setTrail(v),
   onWorkspace: (v) => {
     if (!v) { arm.setWorkspace(null); return; }
-    const pts = sampleWorkspace(joints, 14000);
-    const world = new Float32Array(pts.length);
+    const pts = sampleWorkspace(joints, 40000);
+    const shell = workspaceShell(pts);
+    const world = new Float32Array(shell.positions.length);
     const tmp = new THREE.Vector3();
     arm.group.updateMatrixWorld(true);
-    for (let i = 0; i < pts.length; i += 3) {
-      tmp.set(pts[i], pts[i + 1], pts[i + 2]);
+    for (let i = 0; i < shell.positions.length; i += 3) {
+      tmp.set(shell.positions[i], shell.positions[i + 1], shell.positions[i + 2]);
       arm.group.localToWorld(tmp);
       world[i] = tmp.x; world[i + 1] = tmp.y; world[i + 2] = tmp.z;
     }
-    arm.setWorkspace(world);
+    arm.setWorkspace({ positions: world, indices: shell.indices });
   },
 });
 
@@ -150,3 +151,6 @@ renderer.setAnimationLoop(() => {
   controls.update();
   renderer.render(scene, camera);
 });
+
+// debug/e2e handle
+window.__app = { arm, panel, joints };

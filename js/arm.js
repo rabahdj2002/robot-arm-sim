@@ -78,18 +78,43 @@ export class RobotArm {
     this.trail.visible = false;
     this.scene.add(this.trail);
 
-    // Workspace envelope — additive point cloud of reachable positions
+    // Workspace envelope — translucent dome shell (fresnel rim glow)
     this._wsGeo = new THREE.BufferGeometry();
-    this.workspaceCloud = new THREE.Points(
+    this.workspaceDome = new THREE.Mesh(
       this._wsGeo,
-      new THREE.PointsMaterial({
-        color: 0x35b9d8, size: 0.006, transparent: true, opacity: 0.28,
-        depthWrite: false, blending: THREE.AdditiveBlending,
+      new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+        uniforms: {
+          baseColor: { value: new THREE.Color(0x0e4a66) },
+          rimColor: { value: new THREE.Color(0x4fd8ff) },
+        },
+        vertexShader: `
+          varying vec3 vN;
+          varying vec3 vV;
+          void main() {
+            vN = normalize(normalMatrix * normal);
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            vV = -mv.xyz;
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: `
+          uniform vec3 baseColor;
+          uniform vec3 rimColor;
+          varying vec3 vN;
+          varying vec3 vV;
+          void main() {
+            float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 2.0);
+            vec3 c = mix(baseColor, rimColor, f);
+            gl_FragColor = vec4(c, 0.10 + 0.55 * f);
+          }`,
       }),
     );
-    this.workspaceCloud.frustumCulled = false;
-    this.workspaceCloud.visible = false;
-    this.scene.add(this.workspaceCloud);
+    this.workspaceDome.frustumCulled = false;
+    this.workspaceDome.visible = false;
+    this.scene.add(this.workspaceDome);
   }
 
   /** Rebuild all meshes from joint definitions. */
@@ -209,11 +234,13 @@ export class RobotArm {
     if (v) { this._trailPts = []; this._trailGeo.setDrawRange(0, 0); }
   }
 
-  /** Show/hide the reachable-workspace cloud. positions = world-space xyz triples. */
-  setWorkspace(positions) {
-    if (!positions) { this.workspaceCloud.visible = false; return; }
-    this._wsGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    this.workspaceCloud.visible = true;
+  /** Show/hide the reachable-workspace dome. shell = {positions(world), indices}. */
+  setWorkspace(shell) {
+    if (!shell) { this.workspaceDome.visible = false; return; }
+    this._wsGeo.setAttribute('position', new THREE.BufferAttribute(shell.positions, 3));
+    this._wsGeo.setIndex(new THREE.BufferAttribute(shell.indices, 1));
+    this._wsGeo.computeVertexNormals();
+    this.workspaceDome.visible = true;
   }
 
   /** Convert a world-space point into the arm's DH coordinate space. */

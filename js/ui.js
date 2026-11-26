@@ -90,7 +90,7 @@ export class Panel {
           <label class="toggle" style="margin-top:0;flex:1;justify-content:flex-end"><input id="traj-loop" type="checkbox" checked> loop</label>
         </div>
         <label class="toggle"><input id="trail-check" type="checkbox"> EE trail</label>
-        <label class="toggle"><input id="ws-check" type="checkbox"> workspace cloud</label>
+        <label class="toggle"><input id="ws-check" type="checkbox"> workspace dome</label>
       </div>
       <div class="sec">
         <h3>Forward Kinematics</h3>

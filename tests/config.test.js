@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeJoint, PRESETS } from '../js/dh.js';
 import { encodeConfig, decodeConfig, configFromHash } from '../js/config.js';
 import { trajectoryAt, wrapDelta } from '../js/trajectory.js';
-import { sampleWorkspace, workspaceBounds } from '../js/workspace.js';
+import { sampleWorkspace, workspaceBounds, workspaceShell } from '../js/workspace.js';
 
 test('config encode/decode round-trips a preset', () => {
   const joints = PRESETS['SCARA (RRP)']();
@@ -69,4 +69,21 @@ test('sampleWorkspace produces reachable positions within bounds', () => {
   const reach = joints[0].a + joints[1].a;
   assert.ok(rMax <= reach + 1e-6, `rMax ${rMax} exceeds reach ${reach}`);
   assert.ok(rMax > reach * 0.5, 'samples too clustered');
+});
+
+test('workspaceShell builds a closed dome near max reach', () => {
+  const joints = PRESETS['2R Planar Arm']();
+  const pts = sampleWorkspace(joints, 4000);
+  const shell = workspaceShell(pts);
+  assert.ok(shell.positions.length > 0);
+  assert.ok(shell.indices.length > 0);
+  // every dome vertex is a real reach point — never beyond max reach
+  const reach = joints[0].a + joints[1].a;
+  let vMax = 0;
+  for (let i = 0; i < shell.positions.length; i += 3) {
+    vMax = Math.max(vMax, Math.hypot(
+      shell.positions[i], shell.positions[i + 1], shell.positions[i + 2]));
+  }
+  assert.ok(vMax <= reach + 1e-6, `dome vertex at ${vMax} exceeds reach`);
+  assert.ok(vMax > reach * 0.8, 'dome collapsed inward');
 });
