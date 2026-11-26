@@ -4,7 +4,7 @@ import { RobotArm } from './arm.js';
 import { Panel } from './ui.js';
 import { PRESETS } from './dh.js';
 import { configFromHash } from './config.js';
-import { sampleWorkspace, workspaceShell } from './workspace.js';
+import { sampleWorkspaceConfigs, workspaceShell } from './workspace.js';
 
 const canvas = document.getElementById('viewport');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -67,8 +67,8 @@ const panel = new Panel(document.getElementById('panel'), joints, {
   onTrail: (v) => arm.setTrail(v),
   onWorkspace: (v) => {
     if (!v) { arm.setWorkspace(null); return; }
-    const pts = sampleWorkspace(joints, 40000, Math.random, 0);
-    const shell = workspaceShell(pts, 72, 36, 0);
+    const { positions, values } = sampleWorkspaceConfigs(joints, 40000, Math.random, 0);
+    const shell = workspaceShell(positions, 72, 36, 0, joints, values);
     const world = new Float32Array(shell.positions.length);
     const tmp = new THREE.Vector3();
     arm.group.updateMatrixWorld(true);

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { makeJoint, PRESETS } from '../js/dh.js';
 import { encodeConfig, decodeConfig, configFromHash } from '../js/config.js';
 import { trajectoryAt, wrapDelta } from '../js/trajectory.js';
-import { sampleWorkspace, workspaceBounds, workspaceShell } from '../js/workspace.js';
+import { sampleWorkspace, sampleWorkspaceConfigs, workspaceBounds, workspaceShell } from '../js/workspace.js';
 
 test('config encode/decode round-trips a preset', () => {
   const joints = PRESETS['SCARA (RRP)']();
@@ -98,4 +98,23 @@ test('workspaceShell with zMin=0 never dips under the floor', () => {
   for (let i = 2; i < shell.positions.length; i += 3) {
     assert.ok(shell.positions[i] >= -1e-9, `dome vertex z=${shell.positions[i]} under floor`);
   }
+});
+
+test('workspaceShell refinement pushes dome to the true reach bound', () => {
+  const joints = PRESETS['PUMA-style 6R']();
+  const { positions, values } = sampleWorkspaceConfigs(joints, 15000, Math.random, 0);
+  let sMax = 0;
+  for (let i = 0; i < positions.length; i += 3) {
+    sMax = Math.max(sMax, Math.hypot(positions[i], positions[i + 1], positions[i + 2]));
+  }
+  const refined = workspaceShell(positions, 72, 36, 0, joints, values);
+  let vMax = 0;
+  for (let i = 0; i < refined.positions.length; i += 3) {
+    vMax = Math.max(vMax, Math.hypot(
+      refined.positions[i], refined.positions[i + 1], refined.positions[i + 2]));
+  }
+  // refinement finds extremes MC missed — but never a physically impossible one
+  const reachBound = joints.reduce((s, j) => s + Math.abs(j.a) + Math.abs(j.d), 0);
+  assert.ok(vMax >= sMax, `refined ${vMax} < sampled ${sMax}`);
+  assert.ok(vMax <= reachBound + 1e-6, `refined ${vMax} exceeds reach bound ${reachBound}`);
 });
