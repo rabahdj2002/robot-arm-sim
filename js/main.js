@@ -67,8 +67,8 @@ const panel = new Panel(document.getElementById('panel'), joints, {
   onTrail: (v) => arm.setTrail(v),
   onWorkspace: (v) => {
     if (!v) { arm.setWorkspace(null); return; }
-    const pts = sampleWorkspace(joints, 40000);
-    const shell = workspaceShell(pts);
+    const pts = sampleWorkspace(joints, 40000, Math.random, 0);
+    const shell = workspaceShell(pts, 72, 36, 0);
     const world = new Float32Array(shell.positions.length);
     const tmp = new THREE.Vector3();
     arm.group.updateMatrixWorld(true);

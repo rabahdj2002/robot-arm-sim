@@ -87,3 +87,15 @@ test('workspaceShell builds a closed dome near max reach', () => {
   assert.ok(vMax <= reach + 1e-6, `dome vertex at ${vMax} exceeds reach`);
   assert.ok(vMax > reach * 0.8, 'dome collapsed inward');
 });
+
+test('workspaceShell with zMin=0 never dips under the floor', () => {
+  const joints = PRESETS['PUMA-style 6R']();
+  const pts = sampleWorkspace(joints, 20000, Math.random, 0);
+  for (let i = 2; i < pts.length; i += 3) {
+    assert.ok(pts[i] >= 0, `sample z=${pts[i]} under floor`);
+  }
+  const shell = workspaceShell(pts, 72, 36, 0);
+  for (let i = 2; i < shell.positions.length; i += 3) {
+    assert.ok(shell.positions[i] >= -1e-9, `dome vertex z=${shell.positions[i]} under floor`);
+  }
+});
