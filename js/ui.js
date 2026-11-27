@@ -213,13 +213,14 @@ export class Panel {
     const targetRpy = () =>
       this.oriMode ? this.oriTarget.map((d) => (d * Math.PI) / 180) : null;
     this._targetRpy = targetRpy;
-    const doSolve = () => {
+    const doSolve = (fast = false) => {
       if (!this.target) return;
       this.stopTrajectory(); // IK supersedes waypoint playback
       // TCP offset: the target marks the grasp point between the pads, so
       // the flange solves for target - toolZ * GRIP_Z. Orientation mode
-      // gives tool z directly; position-only gets a second pass using the
-      // tool direction the first solve discovered.
+      // gives tool z directly; position-only needs the discovered tool
+      // direction — live mode reads it from the current pose (self-
+      // correcting every frame), full mode runs a second seeded pass.
       const rpy = targetRpy();
       const validate = this.collisionEnabled
         ? (v) => !checkCollisions(this.joints, v)
@@ -228,9 +229,18 @@ export class Panel {
       if (rpy) {
         const R = matFromRPY(rpy[0], rpy[1], rpy[2]);
         flangeT = this.target.map((v, i) => v - R[i][2] * GRIP_Z);
+      } else if (fast) {
+        const { endEffector } = forwardKinematics(this.joints);
+        flangeT = this.target.map((v, i) => v - endEffector[i][2] * GRIP_Z);
       }
-      let res = solveIK(this.joints, flangeT, { rpy, validate });
-      if (!rpy) {
+      let res = fast
+        ? solveIK(this.joints, flangeT, {
+            rpy, validate,
+            seed: this.joints.map((j) => j.value), restarts: 0, budgetMs: 25,
+          })
+        : solveIK(this.joints, flangeT, { rpy, validate });
+      if (fast) this._liveUntil = performance.now() + 250;
+      if (!rpy && !fast) {
         const { endEffector } = forwardKinematics(this.joints, res.values);
         flangeT = this.target.map((v, i) => v - endEffector[i][2] * GRIP_Z);
         // seed pass 2 with pass 1's solution so it stays on the same
@@ -266,7 +276,7 @@ export class Panel {
       if (this._ikRaf || this._trajOn || !this.root.querySelector('#ik-live').checked) return;
       this._ikRaf = requestAnimationFrame(() => {
         this._ikRaf = null;
-        doSolve();
+        doSolve(true); // live-follow: seeded local track, no branch search
       });
     };
     this.root.querySelectorAll('.tslider,.tval').forEach((inp) =>
@@ -280,7 +290,7 @@ export class Panel {
         liveSolve();
       }));
     this._liveSolve = liveSolve;
-    this.root.querySelector('#ik-solve').addEventListener('click', doSolve);
+    this.root.querySelector('#ik-solve').addEventListener('click', () => doSolve(false));
     this.root.querySelector('#ik-ori').addEventListener('change', (e) => {
       this.oriMode = e.target.checked;
       this.root.querySelector('#ori-row').hidden = !this.oriMode;
@@ -323,7 +333,9 @@ export class Panel {
       const now = performance.now();
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const k = 1 - Math.exp(-7 * dt);
+      // live-follow gets a tighter chase rate; single solves keep the
+      // gentle ~0.6s glide
+      const k = 1 - Math.exp(-(now < this._liveUntil ? 16 : 7) * dt);
       let maxD = 0;
       this.joints.forEach((j, i) => {
         const span = j.max - j.min;
