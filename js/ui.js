@@ -5,7 +5,7 @@ import {
   forwardKinematics, getPosition, getRPY, degreesOfFreedom, dhTable,
   makeJoint, JOINT_TYPES, PRESETS,
 } from './dh.js';
-import { solveIK } from './ik.js';
+import { solveIK, singularity } from './ik.js';
 import { checkCollisions, describeCollision } from './collision.js';
 import { trajectoryAt, wrapDelta } from './trajectory.js';
 import { shareUrl } from './config.js';
@@ -44,6 +44,14 @@ export class Panel {
           <option value="">— Load a preset —</option>
           ${Object.keys(PRESETS).map((k) => `<option>${k}</option>`).join('')}
         </select>
+        <div class="q-row qb-dof">
+          <span class="q-label">joints</span>
+          <button id="qb-minus" class="qb-step">−</button>
+          <b id="qb-n">6</b>
+          <button id="qb-plus" class="qb-step">+</button>
+          <button id="qb-build">Quick build</button>
+        </div>
+        <div id="qb-links"></div>
         <div class="row">
           <button id="add-rev">+ Revolute</button>
           <button id="add-pris">+ Prismatic</button>
@@ -69,6 +77,15 @@ export class Panel {
           <span class="q-label">Z (m)</span>
           <input class="tslider" data-ax="2" type="range" min="-0.1" max="0.8" step="0.005" value="0.15">
           <input class="tval" data-ax="2" type="number" step="0.01" value="0.15">
+        </div>
+        <label class="toggle"><input id="ik-ori" type="checkbox"> match orientation (RPY)</label>
+        <div class="q-row ori-row" id="ori-row" hidden>
+          <span class="q-label">R°</span>
+          <input class="oval" data-o="0" type="number" step="5" value="0">
+          <span class="q-label">P°</span>
+          <input class="oval" data-o="1" type="number" step="5" value="0">
+          <span class="q-label">Y°</span>
+          <input class="oval" data-o="2" type="number" step="5" value="0">
         </div>
         <label class="toggle"><input id="ik-live" type="checkbox" checked> arm follows target</label>
         <label class="toggle"><input id="col-check" type="checkbox" checked> collision limits (floor + self)</label>
@@ -96,6 +113,7 @@ export class Panel {
         <h3>Forward Kinematics</h3>
         <div class="dof">DOF: <b id="dof"></b></div>
         <div id="col-status" class="status"></div>
+        <div id="sing-status" class="status"></div>
         <table class="kv">
           <tr><td>Position (m)</td><td id="ee-pos"></td></tr>
           <tr><td>Orientation (RPY)</td><td id="ee-rpy"></td></tr>
@@ -111,6 +129,51 @@ export class Panel {
       if (name && PRESETS[name]) this.hooks.onPreset(PRESETS[name]());
       e.target.value = '';
     });
+
+    // quick-build: DOF stepper + cobot-pattern DH generation — plain
+    // lengths in cm, no DH knowledge required
+    const QB_ROLES = [
+      { name: 'Waist', alpha: -Math.PI / 2, len: 'd', label: 'waist height', def: 15 },
+      { name: 'Shoulder', alpha: 0, len: 'a', label: 'upper arm', def: 15 },
+      { name: 'Elbow', alpha: Math.PI / 2, len: null },
+      { name: 'Wrist roll', alpha: -Math.PI / 2, len: 'd', label: 'forearm', def: 15 },
+      { name: 'Wrist pitch', alpha: Math.PI / 2, len: null },
+      { name: 'Flange roll', alpha: 0, len: 'd', label: 'wrist → gripper', def: 8 },
+      { name: 'Extra bend', alpha: 0, len: 'a', label: 'extra link', def: 10 },
+    ];
+    this._qbN = 6;
+    this._qbLen = QB_ROLES.map((r) => r.def);
+    const qbRender = () => {
+      this.root.querySelector('#qb-n').textContent = this._qbN;
+      this.root.querySelector('#qb-links').innerHTML = QB_ROLES
+        .slice(0, this._qbN)
+        .map((r, i) => r.len ? `
+          <div class="q-row">
+            <span class="q-label">${r.label} (cm)</span>
+            <input class="qb-len" data-i="${i}" type="number" min="1" max="40" step="0.5" value="${this._qbLen[i]}">
+          </div>` : '')
+        .join('');
+      this.root.querySelectorAll('.qb-len').forEach((inp) =>
+        inp.addEventListener('input', () => {
+          this._qbLen[+inp.dataset.i] = parseFloat(inp.value) || 0;
+        }));
+    };
+    this.root.querySelector('#qb-minus').addEventListener('click', () => {
+      this._qbN = Math.max(1, this._qbN - 1); qbRender();
+    });
+    this.root.querySelector('#qb-plus').addEventListener('click', () => {
+      this._qbN = Math.min(7, this._qbN + 1); qbRender();
+    });
+    this.root.querySelector('#qb-build').addEventListener('click', () => {
+      const built = QB_ROLES.slice(0, this._qbN).map((r, i) =>
+        makeJoint(JOINT_TYPES.REVOLUTE, {
+          name: r.name,
+          alpha: r.alpha,
+          ...(r.len ? { [r.len]: this._qbLen[i] / 100 } : {}),
+        }));
+      this.hooks.onPreset(built);
+    });
+    qbRender();
     this.root.querySelector('#add-rev').addEventListener('click', () =>
       this.hooks.onAddJoint(makeJoint(JOINT_TYPES.REVOLUTE)));
     this.root.querySelector('#add-pris').addEventListener('click', () =>
@@ -145,6 +208,11 @@ export class Panel {
       this.hooks.onWorkspace(e.target.checked));
 
     this.target = [0.25, 0.2, 0.15];
+    this.oriMode = false;
+    this.oriTarget = [0, 0, 0]; // degrees
+    const targetRpy = () =>
+      this.oriMode ? this.oriTarget.map((d) => (d * Math.PI) / 180) : null;
+    this._targetRpy = targetRpy;
     const doSolve = () => {
       if (!this.target) return;
       this.stopTrajectory(); // IK supersedes waypoint playback
@@ -152,6 +220,7 @@ export class Panel {
       // seeds/branches until it finds a converged solution that also
       // doesn't collide, instead of rejecting the first branch it finds.
       const res = solveIK(this.joints, this.target, {
+        rpy: targetRpy(),
         validate: this.collisionEnabled
           ? (v) => !checkCollisions(this.joints, v)
           : null,
@@ -167,9 +236,12 @@ export class Panel {
         st.className = 'status warn';
         this.renderJoints();
       } else {
+        const oriMsg = res.oriError !== undefined
+          ? ` · ori err ${(res.oriError * 180 / Math.PI).toFixed(1)}°`
+          : '';
         st.textContent = res.converged
-          ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)})`
-          : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)`;
+          ? `Converged in ${res.iterations} iters (err ${res.error.toExponential(1)}${oriMsg})`
+          : `Best effort — residual ${res.error.toFixed(3)} m (out of reach)${oriMsg}`;
         st.className = 'status ' + (res.converged ? 'ok' : 'warn');
         // Ease toward the solution — the follower does the actual writes
         // per frame so joints glide instead of snapping.
@@ -192,11 +264,23 @@ export class Panel {
         this.root.querySelectorAll(`[data-ax="${ax}"]`).forEach((o) => {
           if (o !== inp) o.value = inp.value;
         });
-        this.hooks.onTarget(this.target);
+        this.hooks.onTarget(this.target, targetRpy());
         liveSolve();
       }));
     this._liveSolve = liveSolve;
     this.root.querySelector('#ik-solve').addEventListener('click', doSolve);
+    this.root.querySelector('#ik-ori').addEventListener('change', (e) => {
+      this.oriMode = e.target.checked;
+      this.root.querySelector('#ori-row').hidden = !this.oriMode;
+      this.hooks.onTarget(this.target, targetRpy());
+      liveSolve();
+    });
+    this.root.querySelectorAll('.oval').forEach((inp) =>
+      inp.addEventListener('input', () => {
+        this.oriTarget[+inp.dataset.o] = parseFloat(inp.value) || 0;
+        this.hooks.onTarget(this.target, targetRpy());
+        liveSolve();
+      }));
     this.root.querySelector('#col-check').addEventListener('change', (e) => {
       this.collisionEnabled = e.target.checked;
       this.updateReadouts();
@@ -205,7 +289,7 @@ export class Panel {
       this.hooks.onTarget(null);
       this.root.querySelector('#ik-status').textContent = '';
     });
-    this.hooks.onTarget(this.target); // show marker + axes on load
+    this.hooks.onTarget(this.target, targetRpy()); // show marker + axes on load
 
     this.renderJoints();
     this.updateReadouts();
@@ -262,7 +346,7 @@ export class Panel {
     this.root.querySelectorAll('[data-ax]').forEach((o) => {
       o.value = +this.target[+o.dataset.ax].toFixed(3);
     });
-    this.hooks.onTarget(this.target);
+    this.hooks.onTarget(this.target, this._targetRpy?.() ?? null);
     this._liveSolve?.();
   }
 
@@ -421,6 +505,14 @@ export class Panel {
     } else if (el.textContent.startsWith('⚠')) {
       el.textContent = '';
     }
+    // singularity gauge — σmin/σmax of the achievable motion subspace
+    const sg = singularity(this.joints, this.joints.map((j) => j.value));
+    const sel = this.root.querySelector('#sing-status');
+    let txt = `mobility σmin/σmax: ${sg.condPos.toFixed(2)}`;
+    if (sg.condPose !== undefined) txt += ` · pose ${sg.condPose.toFixed(2)}`;
+    sel.textContent = sg.condPos < 0.08 ? `⚠ near-singular (${txt})` : txt;
+    sel.className = 'status ' + (sg.condPos < 0.08 ? 'warn' : sg.condPos < 0.2 ? 'info' : 'ok');
+
     this.hooks.onChange(coll);
   }
 }

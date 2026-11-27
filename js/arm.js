@@ -4,7 +4,8 @@
  * places link meshes between consecutive frame origins.
  */
 import * as THREE from 'three';
-import { forwardKinematics, getPosition, JOINT_TYPES } from './dh.js';
+import { forwardKinematics, getPosition, matFromRPY, JOINT_TYPES } from './dh.js';
+import { singularity } from './ik.js';
 
 const JOINT_COLORS = { revolute: 0xe05555, prismatic: 0x4da3ff, fixed: 0x888888 };
 
@@ -62,6 +63,12 @@ export class RobotArm {
     this.targetAxes = new THREE.AxesHelper(0.12);
     this.targetAxes.visible = false;
     this.scene.add(this.targetAxes);
+
+    // singularity "stuck direction" arrow at the EE tip (magenta = near)
+    this.stuckArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 0.14, 0xff3fd8, 0.035, 0.02);
+    this.stuckArrow.visible = false;
+    this.scene.add(this.stuckArrow);
 
     // EE trail — ring buffer of world-space tip positions, fading line
     this._trailMax = 1500;
@@ -202,6 +209,44 @@ export class RobotArm {
     tip.position.copy(points[points.length - 1]);
     this.group.add(tip);
 
+    // parallel-jaw gripper at the tool frame — jaws along +z, open along x
+    const gmat = new THREE.MeshStandardMaterial({ color: 0x9aa7bd, metalness: 0.6, roughness: 0.35 });
+    const gripper = new THREE.Group();
+    const palm = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.036, 0.018), gmat);
+    palm.position.z = 0.012;
+    gripper.add(palm);
+    for (const s of [-1, 1]) {
+      const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.012, 0.034), gmat);
+      jaw.position.set(s * 0.013, 0, 0.037);
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.016, 0.008), gmat);
+      pad.position.set(s * 0.011, 0, 0.052);
+      gripper.add(jaw, pad);
+    }
+    const eeT = transforms[transforms.length - 1];
+    const eeM = new THREE.Matrix4().set(
+      eeT[0][0], eeT[0][1], eeT[0][2], eeT[0][3],
+      eeT[1][0], eeT[1][1], eeT[1][2], eeT[1][3],
+      eeT[2][0], eeT[2][1], eeT[2][2], eeT[2][3],
+      0, 0, 0, 1,
+    );
+    gripper.applyMatrix4(eeM);
+    this.group.add(gripper);
+
+    // singularity arrow: shows the weakest EE motion direction when the
+    // arm is close to losing it (amber < 0.15, magenta < 0.05)
+    const sg = singularity(this.joints, values);
+    if (sg.condPos < 0.15 && points.length > 1) {
+      const dir = new THREE.Vector3(...sg.dirPos);
+      this.stuckArrow.position.copy(
+        this.group.localToWorld(points[points.length - 1].clone()));
+      this.stuckArrow.setDirection(this.group.localToWorld(dir.clone()).sub(
+        this.group.localToWorld(new THREE.Vector3())).normalize());
+      this.stuckArrow.setColor(sg.condPos < 0.05 ? 0xff3fd8 : 0xffb347);
+      this.stuckArrow.visible = true;
+    } else {
+      this.stuckArrow.visible = false;
+    }
+
     // append tip position to the trail (world space)
     if (this.trail.visible && this._lastTip !== undefined) {
       const wp = this.group.localToWorld(points[points.length - 1].clone());
@@ -249,7 +294,7 @@ export class RobotArm {
     return this.group.worldToLocal(v.clone());
   }
 
-  setTarget(pos) {
+  setTarget(pos, rpy = null) {
     this.targetMarker.visible = pos !== null;
     this.targetAxes.visible = pos !== null;
     if (pos) {
@@ -259,7 +304,20 @@ export class RobotArm {
       const wp = this.group.localToWorld(new THREE.Vector3(pos[0], pos[1], pos[2]));
       this.targetMarker.position.copy(wp);
       this.targetAxes.position.copy(wp);
-      this.targetAxes.quaternion.copy(this.group.quaternion);
+      // with an orientation target, the axes show the demanded RPY;
+      // without one they mirror the DH base frame
+      if (rpy) {
+        const Rdh = matFromRPY(rpy[0], rpy[1], rpy[2]);
+        const m = new THREE.Matrix4().set(
+          Rdh[0][0], Rdh[0][1], Rdh[0][2], 0,
+          Rdh[1][0], Rdh[1][1], Rdh[1][2], 0,
+          Rdh[2][0], Rdh[2][1], Rdh[2][2], 0,
+          0, 0, 0, 1);
+        this.targetAxes.quaternion.setFromRotationMatrix(
+          m.premultiply(new THREE.Matrix4().makeRotationX(-Math.PI / 2)));
+      } else {
+        this.targetAxes.quaternion.copy(this.group.quaternion);
+      }
     }
   }
 

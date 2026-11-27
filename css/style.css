@@ -65,6 +65,18 @@ main { flex: 1; display: flex; min-height: 0; }
 .viewport-wrap { flex: 1; position: relative; min-width: 0; }
 #viewport { width: 100%; height: 100%; display: block; }
 
+/* ---------- intro card ---------- */
+#intro-card {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  max-width: 380px; z-index: 5;
+  background: rgba(16,21,36,.92); border: 1px solid var(--line-2); border-radius: 12px;
+  padding: 12px 16px; backdrop-filter: blur(10px);
+  font-size: 12px; line-height: 1.55; color: var(--muted);
+  display: flex; flex-direction: column; gap: 6px;
+}
+#intro-card b { color: var(--text); }
+#intro-card .ghost { align-self: flex-end; }
+
 /* ---------- HUD ---------- */
 .hud { position: absolute; display: flex; gap: 8px; pointer-events: none; }
 .hud-tl { top: 14px; left: 14px; }
@@ -148,6 +160,13 @@ button:active { transform: translateY(1px); }
 .del:hover { background: #ff5c7a18; border-color: #ff5c7a44; }
 .q-row { display: flex; gap: 7px; align-items: center; margin-bottom: 7px; }
 .q-label { font-size: 10.5px; color: var(--muted); width: 46px; font-family: var(--mono); }
+.qb-dof { margin-top: 8px; }
+.qb-dof b { font-size: 12px; min-width: 14px; text-align: center; }
+.qb-step { width: 22px; padding: 2px 0; font-size: 12px; line-height: 1; }
+.qb-len { flex: 1; font-family: var(--mono); font-size: 10.5px; text-align: right; }
+.ori-row { margin-top: 6px; }
+.ori-row .q-label { width: auto; }
+.oval { flex: 1; min-width: 0; font-family: var(--mono); font-size: 10.5px; text-align: right; }
 .qslider, .tslider {
   flex: 1; padding: 0; accent-color: var(--accent); height: 18px; cursor: ew-resize;
 }
@@ -182,6 +201,7 @@ th { color: var(--faint); font-weight: 500; font-size: 9.5px; text-transform: up
 /* ---------- status ---------- */
 .status { font-size: 11px; margin-top: 7px; min-height: 15px; font-family: var(--mono); }
 .status.ok { color: var(--ok); }
+.status.info { color: var(--muted); }
 .status.warn { color: var(--warn); }
 .status.err, .status.bad { color: var(--err); }
 

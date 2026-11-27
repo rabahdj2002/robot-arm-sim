@@ -63,7 +63,7 @@ const panel = new Panel(document.getElementById('panel'), joints, {
     arm.build(joints);
     panel.renderJoints();
   },
-  onTarget: (pos) => arm.setTarget(pos),
+  onTarget: (pos, rpy) => arm.setTarget(pos, rpy),
   onTrail: (v) => arm.setTrail(v),
   onWorkspace: (v) => {
     if (!v) { arm.setWorkspace(null); return; }
@@ -82,6 +82,14 @@ const panel = new Panel(document.getElementById('panel'), joints, {
 });
 
 document.getElementById('frames-toggle').addEventListener('change', (e) => arm.setShowFrames(e.target.checked));
+
+// onboarding strip — show once, remember dismissal
+const intro = document.getElementById('intro-card');
+if (!localStorage.getItem('ras_intro')) intro.hidden = false;
+document.getElementById('intro-close').addEventListener('click', () => {
+  intro.hidden = true;
+  localStorage.setItem('ras_intro', '1');
+});
 
 const HOME_POS = [0.55, 0.45, 0.75], HOME_TGT = [0, 0.2, 0];
 document.getElementById('reset-view').addEventListener('click', () => {

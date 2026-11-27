@@ -76,6 +76,19 @@ export function getRPY(m) {
   return [roll, pitch, yaw];
 }
 
+/** Rotation matrix from roll-pitch-yaw (XYZ order) — inverse of getRPY. */
+export function matFromRPY(roll, pitch, yaw) {
+  const cr = Math.cos(roll), sr = Math.sin(roll);
+  const cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  // R = Rz(yaw) · Ry(pitch) · Rx(roll)
+  return [
+    [cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+    [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+    [-sp, cp * sr, cp * cr],
+  ];
+}
+
 /**
  * Mobility of the chain (Grübler–Kutzbach reduced to a serial arm of
  * 1-DOF joints — every non-fixed joint contributes 1).
