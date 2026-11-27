@@ -4,7 +4,7 @@
  * places link meshes between consecutive frame origins.
  */
 import * as THREE from 'three';
-import { forwardKinematics, getPosition, matFromRPY, JOINT_TYPES } from './dh.js';
+import { forwardKinematics, getPosition, matFromRPY, JOINT_TYPES, GRIP_Z } from './dh.js';
 import { singularity } from './ik.js';
 
 const JOINT_COLORS = { revolute: 0xe05555, prismatic: 0x4da3ff, fixed: 0x888888 };
@@ -30,6 +30,10 @@ function makeLinkMesh(from, to, radius = 0.022, color = 0xd8dde8) {
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
   return mesh;
 }
+
+// jaw x-offsets: open clears the 26mm marker, closed kisses its surface
+const GRIP_OPEN = 0.0365;
+const GRIP_CLOSED = 0.0305;
 
 function makeJointMesh(type) {
   const group = new THREE.Group();
@@ -209,19 +213,24 @@ export class RobotArm {
     tip.position.copy(points[points.length - 1]);
     this.group.add(tip);
 
-    // parallel-jaw gripper at the tool frame — jaws along +z, open along x
+    // parallel-jaw gripper at the tool frame — fingers along +z, opening on x.
+    // Pads straddle GRIP_Z so the TCP offset lands them around the marker.
     const gmat = new THREE.MeshStandardMaterial({ color: 0x9aa7bd, metalness: 0.6, roughness: 0.35 });
+    const pmat = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, metalness: 0.1, roughness: 0.9 });
     const gripper = new THREE.Group();
     const palm = new THREE.Mesh(new THREE.BoxGeometry(0.036, 0.036, 0.018), gmat);
     palm.position.z = 0.012;
     gripper.add(palm);
+    this._jawParts = [];
     for (const s of [-1, 1]) {
-      const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.012, 0.034), gmat);
-      jaw.position.set(s * 0.013, 0, 0.037);
-      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.007, 0.016, 0.008), gmat);
-      pad.position.set(s * 0.011, 0, 0.052);
+      const jaw = new THREE.Mesh(new THREE.BoxGeometry(0.006, 0.014, 0.032), gmat);
+      jaw.position.set(s * GRIP_OPEN, 0, 0.034);
+      const pad = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.018, 0.012), pmat);
+      pad.position.set(s * GRIP_OPEN, 0, GRIP_Z);
       gripper.add(jaw, pad);
+      this._jawParts.push({ s, jaw, pad });
     }
+    this._grip = 0;
     const eeT = transforms[transforms.length - 1];
     const eeM = new THREE.Matrix4().set(
       eeT[0][0], eeT[0][1], eeT[0][2], eeT[0][3],
@@ -231,6 +240,23 @@ export class RobotArm {
     );
     gripper.applyMatrix4(eeM);
     this.group.add(gripper);
+
+    // jaws close when the target marker sits at the TCP between the pads
+    if (this._jawParts) {
+      const tcp = this.group.localToWorld(new THREE.Vector3(
+        eeT[0][3] + eeT[0][2] * GRIP_Z,
+        eeT[1][3] + eeT[1][2] * GRIP_Z,
+        eeT[2][3] + eeT[2][2] * GRIP_Z));
+      // grip state is a pure function of TCP→marker distance — closes
+      // smoothly as the arm eases in, correct even at rest
+      const d = tcp.distanceTo(this.targetMarker.position);
+      this._grip = this.targetMarker.visible
+        ? Math.min(1, Math.max(0, (0.05 - d) / 0.02)) : 0;
+      const jx = GRIP_OPEN - (GRIP_OPEN - GRIP_CLOSED) * this._grip;
+      this._jawParts.forEach(({ s, jaw, pad }) => {
+        jaw.position.x = pad.position.x = s * jx;
+      });
+    }
 
     // singularity arrow: shows the weakest EE motion direction when the
     // arm is close to losing it (amber < 0.15, magenta < 0.05)

@@ -355,6 +355,7 @@ export function solveIK(joints, target, options = {}) {
     budgetMs = 60,
     validate = null,
     rpy = null,            // [roll,pitch,yaw] target orientation, or null
+    seed = null,           // initial joint vector; defaults to current pose
   } = options;
   const opts = { maxIterations, tolerance, oriTolerance, damping, oriWeight };
   const Rt = rpy ? matFromRPY(rpy[0], rpy[1], rpy[2]) : null;
@@ -368,7 +369,7 @@ export function solveIK(joints, target, options = {}) {
     joints.map((j, i) =>
       i === 0 && j.type === JOINT_TYPES.REVOLUTE ? wrapOrClamp(q, j) : j.value);
   const seeds = [
-    cur,
+    seed ?? cur,
     reseedBase(az),
     reseedBase(az + Math.PI),
     reseedBase(cur[0] + Math.PI),

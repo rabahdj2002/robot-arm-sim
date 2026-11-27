@@ -2,8 +2,8 @@
  * Control panel — joint editor, sliders, FK readouts, DH table, IK target.
  */
 import {
-  forwardKinematics, getPosition, getRPY, degreesOfFreedom, dhTable,
-  makeJoint, JOINT_TYPES, PRESETS,
+  forwardKinematics, getPosition, getRPY, matFromRPY, degreesOfFreedom,
+  dhTable, makeJoint, JOINT_TYPES, PRESETS, GRIP_Z,
 } from './dh.js';
 import { solveIK, singularity } from './ik.js';
 import { checkCollisions, describeCollision } from './collision.js';
@@ -216,15 +216,27 @@ export class Panel {
     const doSolve = () => {
       if (!this.target) return;
       this.stopTrajectory(); // IK supersedes waypoint playback
-      // Hand the solver the collision predicate — it keeps retrying other
-      // seeds/branches until it finds a converged solution that also
-      // doesn't collide, instead of rejecting the first branch it finds.
-      const res = solveIK(this.joints, this.target, {
-        rpy: targetRpy(),
-        validate: this.collisionEnabled
-          ? (v) => !checkCollisions(this.joints, v)
-          : null,
-      });
+      // TCP offset: the target marks the grasp point between the pads, so
+      // the flange solves for target - toolZ * GRIP_Z. Orientation mode
+      // gives tool z directly; position-only gets a second pass using the
+      // tool direction the first solve discovered.
+      const rpy = targetRpy();
+      const validate = this.collisionEnabled
+        ? (v) => !checkCollisions(this.joints, v)
+        : null;
+      let flangeT = this.target;
+      if (rpy) {
+        const R = matFromRPY(rpy[0], rpy[1], rpy[2]);
+        flangeT = this.target.map((v, i) => v - R[i][2] * GRIP_Z);
+      }
+      let res = solveIK(this.joints, flangeT, { rpy, validate });
+      if (!rpy) {
+        const { endEffector } = forwardKinematics(this.joints, res.values);
+        flangeT = this.target.map((v, i) => v - endEffector[i][2] * GRIP_Z);
+        // seed pass 2 with pass 1's solution so it stays on the same
+        // wrist branch — otherwise the discovered tool-z is stale
+        res = solveIK(this.joints, flangeT, { validate, seed: res.values });
+      }
       const coll = this.collisionEnabled
         ? checkCollisions(this.joints, res.values)
         : null;

@@ -51,6 +51,10 @@ export function jointParams(joint, value = null) {
  * Returns { transforms, endEffector } — transforms[0] is the base frame,
  * transforms[i] is the frame after joint i (1-indexed), last is the tool frame.
  */
+// Tool-center-point offset: gripper pad midpoint past the flange (tool +z).
+// IK targets the TCP — the flange is solved so the pads land on the marker.
+export const GRIP_Z = 0.046;
+
 export function forwardKinematics(joints, values = null, base = null) {
   let T = base || mat4Identity();
   const transforms = [T];

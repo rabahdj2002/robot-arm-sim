@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  forwardKinematics, getPosition, getRPY, matFromRPY, PRESETS, JOINT_TYPES, makeJoint,
+  forwardKinematics, getPosition, getRPY, matFromRPY, PRESETS, JOINT_TYPES,
+  makeJoint, GRIP_Z,
 } from '../js/dh.js';
 import { solveIK, geometricJacobian, singularity } from '../js/ik.js';
 
@@ -78,4 +79,23 @@ test('solveIK rpy on underactuated chain does not crash', () => {
   const joints = PRESETS['2R Planar Arm']();
   const res = solveIK(joints, [0.3, 0.2, 0], { rpy: [0, 0, 0], budgetMs: 80 });
   assert.ok(res.values.length === 2); // may not converge — just don't explode
+});
+
+test('TCP grip offset: solving flange target puts pads on the marker', () => {
+  const joints = PRESETS['PUMA-style 6R']();
+  // reachable TCP pose from a known config
+  const src = [0.5, -0.7, 0.8, 0.3, -0.6, 0.9];
+  const T = forwardKinematics(joints, src).endEffector;
+  const R0 = matFromRPY(...getRPY(T));
+  const tcpTarget = [0, 1, 2].map((i) => T[i][3] + T[i][2] * GRIP_Z);
+  const rpy = getRPY(T);
+  // UI does this: solve the flange at tcpTarget - toolZ * GRIP_Z
+  const flangeT = tcpTarget.map((v, i) => v - R0[i][2] * GRIP_Z);
+  const res = solveIK(joints, flangeT, { rpy, restarts: 10, budgetMs: 300 });
+  assert.ok(res.converged, `did not converge: ${res.error}`);
+  // TCP of the solution must land back on the marker position
+  const T2 = forwardKinematics(joints, res.values).endEffector;
+  const tcp = [0, 1, 2].map((i) => T2[i][3] + T2[i][2] * GRIP_Z);
+  const dist = Math.hypot(...tcp.map((v, i) => v - tcpTarget[i]));
+  assert.ok(dist < 0.005, `TCP missed target by ${dist} m`);
 });
